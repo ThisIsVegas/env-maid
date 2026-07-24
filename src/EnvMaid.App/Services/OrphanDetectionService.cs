@@ -10,6 +10,11 @@ public class OrphanDetectionService
         ".exe", ".bat", ".cmd", ".ps1", ".dll"
     };
 
+    private static readonly HashSet<string> ShadowCheckExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".exe", ".bat", ".cmd"
+    };
+
     public void ApplyFlags(IReadOnlyList<PathEntry> userEntries, IReadOnlyList<PathEntry> systemEntries)
     {
         var allEntries = userEntries.Concat(systemEntries).ToList();
@@ -19,6 +24,53 @@ public class OrphanDetectionService
 
         ApplyFlagsForScope(userEntries, byNormalized);
         ApplyFlagsForScope(systemEntries, byNormalized);
+
+        // Real PATH resolution order: System entries first, then User entries appended.
+        ApplyShadowFlags(systemEntries.Concat(userEntries).ToList());
+    }
+
+    private static void ApplyShadowFlags(IReadOnlyList<PathEntry> resolutionOrderEntries)
+    {
+        var seenExeNames = new Dictionary<string, (string Normalized, string Display)>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var entry in resolutionOrderEntries)
+        {
+            var expanded = Environment.ExpandEnvironmentVariables(entry.Path);
+            if (!Directory.Exists(expanded))
+                continue;
+
+            var normalizedFolder = Normalize(entry.Path);
+
+            var shadowedFrom = new List<string>();
+            foreach (var file in Directory.EnumerateFiles(expanded))
+            {
+                if (!ShadowCheckExtensions.Contains(Path.GetExtension(file)))
+                    continue;
+
+                var name = Path.GetFileName(file);
+                if (seenExeNames.TryGetValue(name, out var first))
+                {
+                    if (!string.Equals(first.Normalized, normalizedFolder, StringComparison.OrdinalIgnoreCase)
+                        && !shadowedFrom.Contains(first.Display))
+                        shadowedFrom.Add(first.Display);
+                }
+                else
+                {
+                    seenExeNames[name] = (normalizedFolder, expanded);
+                }
+            }
+
+            if (shadowedFrom.Count == 0)
+                continue;
+
+            var shadowReason = $"Shadowed by {string.Join(", ", shadowedFrom)}";
+            entry.Reason = string.IsNullOrEmpty(entry.Reason)
+                ? shadowReason
+                : $"{entry.Reason}; {shadowReason}";
+
+            if (entry.Confidence == FlagConfidence.None)
+                entry.Confidence = FlagConfidence.Low;
+        }
     }
 
     private void ApplyFlagsForScope(IReadOnlyList<PathEntry> scopeEntries, Dictionary<string, List<PathEntry>> byNormalized)
