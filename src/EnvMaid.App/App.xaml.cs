@@ -1,4 +1,5 @@
 using System.Windows;
+using EnvMaid.App.Models;
 using EnvMaid.App.Services;
 using EnvMaid.App.ViewModels;
 
