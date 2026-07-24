@@ -1,26 +1,22 @@
 using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
-using System.Windows.Input;
 using EnvMaid.App.Models;
 
 namespace EnvMaid.App.Views;
 
 public partial class PathPanel : UserControl
 {
+    /// <summary>Raised when a row with a shadow conflict is double-clicked, so the
+    /// host can switch to the Conflicts tab.</summary>
+    public event EventHandler? ConflictActivated;
+
     public PathPanel()
     {
         InitializeComponent();
     }
 
-    // The DataGrid consumes the first click on an unselected cell for selection, so a
-    // ToggleButton in a cell often needs two clicks. Handle the press directly and mark
-    // it handled so the toggle is reliable on the first click.
-    private void ConflictToggle_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    private void Row_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
-        if (sender is ToggleButton { DataContext: PathEntry entry })
-        {
-            entry.IsExpanded = !entry.IsExpanded;
-            e.Handled = true;
-        }
+        if (sender is DataGridRow { Item: PathEntry entry } && entry.HasShadowConflicts)
+            ConflictActivated?.Invoke(this, EventArgs.Empty);
     }
 }

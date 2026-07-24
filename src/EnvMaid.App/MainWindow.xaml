@@ -199,10 +199,12 @@
 
         <TabControl x:Name="MainTabs">
             <TabItem Header="User PATH">
-                <views:PathPanel DataContext="{Binding UserPaths}"/>
+                <views:PathPanel x:Name="UserPanel" DataContext="{Binding UserPaths}"
+                                 ConflictActivated="PathPanel_ConflictActivated"/>
             </TabItem>
             <TabItem Header="System PATH 🛡 (admin required)">
-                <views:PathPanel DataContext="{Binding SystemPaths}"/>
+                <views:PathPanel x:Name="SystemPanel" DataContext="{Binding SystemPaths}"
+                                 ConflictActivated="PathPanel_ConflictActivated"/>
             </TabItem>
             <TabItem Header="Conflicts">
                 <views:ConflictsView DataContext="{Binding Conflicts}"/>

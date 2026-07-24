@@ -21,6 +21,11 @@ public partial class MainWindow : Window
         MainTabs.SelectedIndex = 2; // Conflicts tab
     }
 
+    private void PathPanel_ConflictActivated(object? sender, EventArgs e)
+    {
+        MainTabs.SelectedIndex = 2; // Conflicts tab
+    }
+
     private void RestoreBackup_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new BackupRestoreDialog(_viewModel.GetBackupNames()) { Owner = this };

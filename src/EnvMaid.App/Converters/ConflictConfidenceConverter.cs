@@ -14,8 +14,9 @@ public class ConflictConfidenceConverter : IValueConverter
 
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
-        var confidence = value as ConflictConfidence? ?? ConflictConfidence.Possibly;
         var asBrush = string.Equals(parameter as string, "brush", StringComparison.OrdinalIgnoreCase);
+        if (value is not ConflictConfidence confidence)
+            return asBrush ? Brushes.Transparent : string.Empty;
 
         return confidence switch
         {
