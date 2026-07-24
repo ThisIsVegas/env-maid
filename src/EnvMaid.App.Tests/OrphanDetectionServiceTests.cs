@@ -146,9 +146,12 @@ public class OrphanDetectionServiceTests
         _sut.ApplyFlags(user, []);
 
         Assert.Equal(string.Empty, user[0].Reason);
-        Assert.Equal($"Shadowed by {dirA}", user[1].Reason);
+        Assert.Empty(user[0].ShadowConflicts);
         Assert.Equal(FlagConfidence.Low, user[1].Confidence);
         Assert.False(user[1].IsChecked);
+        var conflict = Assert.Single(user[1].ShadowConflicts);
+        Assert.Equal("java.exe", conflict.ExeName);
+        Assert.Equal(dirA, conflict.ShadowedFolderPath);
     }
 
     [Fact]
@@ -164,7 +167,10 @@ public class OrphanDetectionServiceTests
         _sut.ApplyFlags(user, system);
 
         Assert.Equal(string.Empty, system[0].Reason);
-        Assert.Equal($"Shadowed by {dirSystem}", user[0].Reason);
+        Assert.Empty(system[0].ShadowConflicts);
+        var conflict = Assert.Single(user[0].ShadowConflicts);
+        Assert.Equal("python.exe", conflict.ExeName);
+        Assert.Equal(dirSystem, conflict.ShadowedFolderPath);
     }
 
     [Fact]
