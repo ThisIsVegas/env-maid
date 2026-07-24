@@ -130,6 +130,68 @@ public class OrphanDetectionServiceTests
         Assert.Equal("Duplicate entry", user[1].Reason);
     }
 
+    [Fact]
+    public void ApplyFlags_SameExeInTwoDistinctFolders_LaterOneFlaggedAsShadowed()
+    {
+        var dirA = CreateTempDir();
+        var dirB = CreateTempDir();
+        File.WriteAllText(Path.Combine(dirA, "java.exe"), "hi");
+        File.WriteAllText(Path.Combine(dirB, "java.exe"), "hi");
+        var user = new List<PathEntry>
+        {
+            new(dirA, PathScope.User),
+            new(dirB, PathScope.User),
+        };
+
+        _sut.ApplyFlags(user, []);
+
+        Assert.Equal(string.Empty, user[0].Reason);
+        Assert.Empty(user[0].ShadowConflicts);
+        Assert.Equal(FlagConfidence.Low, user[1].Confidence);
+        Assert.False(user[1].IsChecked);
+        var conflict = Assert.Single(user[1].ShadowConflicts);
+        Assert.Equal("java.exe", conflict.ExeName);
+        Assert.Equal(dirA, conflict.ShadowedFolderPath);
+    }
+
+    [Fact]
+    public void ApplyFlags_SystemResolvesBeforeUser_UserEntryFlaggedAsShadowed()
+    {
+        var dirSystem = CreateTempDir();
+        var dirUser = CreateTempDir();
+        File.WriteAllText(Path.Combine(dirSystem, "python.exe"), "hi");
+        File.WriteAllText(Path.Combine(dirUser, "python.exe"), "hi");
+        var user = new List<PathEntry> { new(dirUser, PathScope.User) };
+        var system = new List<PathEntry> { new(dirSystem, PathScope.System) };
+
+        _sut.ApplyFlags(user, system);
+
+        Assert.Equal(string.Empty, system[0].Reason);
+        Assert.Empty(system[0].ShadowConflicts);
+        var conflict = Assert.Single(user[0].ShadowConflicts);
+        Assert.Equal("python.exe", conflict.ExeName);
+        Assert.Equal(dirSystem, conflict.ShadowedFolderPath);
+    }
+
+    [Fact]
+    public void ApplyFlags_DifferentExeNamesInDifferentFolders_NotFlaggedAsShadowed()
+    {
+        var dirA = CreateTempDir();
+        var dirB = CreateTempDir();
+        File.WriteAllText(Path.Combine(dirA, "java.exe"), "hi");
+        File.WriteAllText(Path.Combine(dirB, "python.exe"), "hi");
+        var user = new List<PathEntry>
+        {
+            new(dirA, PathScope.User),
+            new(dirB, PathScope.User),
+        };
+
+        _sut.ApplyFlags(user, []);
+
+        Assert.Equal(string.Empty, user[0].Reason);
+        Assert.Equal(string.Empty, user[1].Reason);
+    }
+
     private static string CreateTempDir()
     {
         var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
