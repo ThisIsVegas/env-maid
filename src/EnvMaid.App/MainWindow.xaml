@@ -96,7 +96,7 @@
             <TabItem Header="User PATH">
                 <views:PathPanel DataContext="{Binding UserPaths}"/>
             </TabItem>
-            <TabItem Header="System PATH">
+            <TabItem Header="System PATH 🛡 (admin required)">
                 <views:PathPanel DataContext="{Binding SystemPaths}"/>
             </TabItem>
         </TabControl>
