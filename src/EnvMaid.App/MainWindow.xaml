@@ -7,8 +7,9 @@
         Background="#1E1E2E" FontFamily="Segoe UI">
 
     <Window.Resources>
-        <conv:HealthToBrushConverter x:Key="HealthToBrush"/>
+        <conv:CountToBrushConverter x:Key="CountToBrush"/>
         <conv:EnumToBoolConverter x:Key="EnumToBool"/>
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
 
         <!-- Summary strip tile -->
         <Style x:Key="StatTile" TargetType="Border">
@@ -153,31 +154,28 @@
             <StackPanel Orientation="Horizontal">
                 <Border Style="{StaticResource StatTile}">
                     <StackPanel>
-                        <TextBlock Text="Health" Style="{StaticResource TileLabel}"/>
-                        <TextBlock Text="{Binding Health}" FontSize="16" FontWeight="Bold"
-                                   Foreground="{Binding Health, Converter={StaticResource HealthToBrush}}"/>
-                    </StackPanel>
-                </Border>
-                <Border Style="{StaticResource StatTile}">
-                    <StackPanel>
                         <TextBlock Text="Broken" Style="{StaticResource TileLabel}"/>
-                        <TextBlock Text="{Binding BrokenCount}" Style="{StaticResource TileValue}"/>
+                        <TextBlock Text="{Binding BrokenCount}" Style="{StaticResource TileValue}"
+                                   Foreground="{Binding BrokenCount, Converter={StaticResource CountToBrush}, ConverterParameter=red}"/>
                     </StackPanel>
                 </Border>
                 <Border Style="{StaticResource StatTile}">
                     <StackPanel>
                         <TextBlock Text="Duplicates" Style="{StaticResource TileLabel}"/>
-                        <TextBlock Text="{Binding DuplicateCount}" Style="{StaticResource TileValue}"/>
+                        <TextBlock Text="{Binding DuplicateCount}" Style="{StaticResource TileValue}"
+                                   Foreground="{Binding DuplicateCount, Converter={StaticResource CountToBrush}, ConverterParameter=red}"/>
                     </StackPanel>
                 </Border>
                 <Border Style="{StaticResource StatTile}" Cursor="Hand"
                         MouseLeftButtonUp="ConflictsTile_Click">
                     <StackPanel>
                         <TextBlock Text="Conflicts" Style="{StaticResource TileLabel}"/>
-                        <TextBlock Text="{Binding ConflictCount}" Style="{StaticResource TileValue}"/>
+                        <TextBlock Text="{Binding ConflictCount}" Style="{StaticResource TileValue}"
+                                   Foreground="{Binding ConflictCount, Converter={StaticResource CountToBrush}, ConverterParameter=amber}"/>
                     </StackPanel>
                 </Border>
-                <Border Style="{StaticResource StatTile}" MinWidth="150">
+                <Border Style="{StaticResource StatTile}" MinWidth="150"
+                        Visibility="{Binding ShowLength, Converter={StaticResource BoolToVis}}">
                     <StackPanel>
                         <TextBlock Text="PATH length" Style="{StaticResource TileLabel}"/>
                         <TextBlock Text="{Binding LengthLabel}" FontSize="16" FontWeight="Bold">

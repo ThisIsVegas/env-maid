@@ -46,6 +46,26 @@ public class PathDiffServiceTests
     }
 
     [Fact]
+    public void RemovedEmptyEntry_DisplaysAsEmptyLabelWithReason()
+    {
+        var diff = _sut.Diff(PathScope.User, new[] { "" }, Array.Empty<string>());
+
+        var removed = Assert.Single(diff.Changes);
+        Assert.Equal(PathChangeKind.Removed, removed.Kind);
+        Assert.Equal("(empty entry)", removed.DisplayPath);
+        Assert.Equal("empty entry", removed.Reason);
+    }
+
+    [Fact]
+    public void RemovedMissingFolder_HasReason()
+    {
+        var missing = "Z:\\definitely\\not\\here\\" + Guid.NewGuid();
+        var diff = _sut.Diff(PathScope.User, new[] { missing }, Array.Empty<string>());
+
+        Assert.Equal("folder did not exist", Assert.Single(diff.Changes).Reason);
+    }
+
+    [Fact]
     public void ComparisonIsCaseInsensitive()
     {
         var diff = _sut.Diff(PathScope.User, new[] { "C:\\Tools" }, new[] { "c:\\tools" });

@@ -23,7 +23,18 @@ public class DashboardViewModelTests
         vm.Refresh();
 
         Assert.Equal(2, vm.BrokenCount);
-        Assert.Equal("Needs attention", vm.Health);
+    }
+
+    [Fact]
+    public void ShowLength_FalseForCombined_TrueForSingleScope()
+    {
+        var user = new PathListViewModel(PathScope.User);
+        var system = new PathListViewModel(PathScope.System);
+        var vm = new DashboardViewModel(user, system, EmptyConflicts(user, system));
+
+        Assert.False(vm.ShowLength);           // combined
+        vm.Scope = DashboardScope.User;
+        Assert.True(vm.ShowLength);
     }
 
     [Fact]
@@ -38,33 +49,6 @@ public class DashboardViewModelTests
         vm.Scope = DashboardScope.User; // triggers Refresh
 
         Assert.Equal(1, vm.BrokenCount);
-    }
-
-    [Fact]
-    public void Health_HealthyWhenNoFlags()
-    {
-        var user = new PathListViewModel(PathScope.User);
-        var system = new PathListViewModel(PathScope.System);
-        user.Entries.Add(new PathEntry("ok", PathScope.User) { Confidence = FlagConfidence.None });
-
-        var vm = new DashboardViewModel(user, system, EmptyConflicts(user, system));
-        vm.Refresh();
-
-        Assert.Equal("Healthy", vm.Health);
-        Assert.Equal(0, vm.BrokenCount);
-    }
-
-    [Fact]
-    public void Health_MinorWhenOnlyLowConfidence()
-    {
-        var user = new PathListViewModel(PathScope.User);
-        var system = new PathListViewModel(PathScope.System);
-        user.Entries.Add(new PathEntry("weak", PathScope.User) { Flags = PathFlag.NoExecutable, Confidence = FlagConfidence.Low });
-
-        var vm = new DashboardViewModel(user, system, EmptyConflicts(user, system));
-        vm.Refresh();
-
-        Assert.Equal("Minor issues", vm.Health);
     }
 
     [Fact]

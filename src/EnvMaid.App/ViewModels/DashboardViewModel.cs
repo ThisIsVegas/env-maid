@@ -21,13 +21,16 @@ public partial class DashboardViewModel : ObservableObject
     [ObservableProperty]
     private DashboardScope _scope = DashboardScope.Combined;
 
-    [ObservableProperty] private string _health = "Healthy";
     [ObservableProperty] private int _brokenCount;
     [ObservableProperty] private int _duplicateCount;
     [ObservableProperty] private int _conflictCount;
     [ObservableProperty] private int _totalLength;
     [ObservableProperty] private string _lengthLabel = "0 / 2047";
     [ObservableProperty] private bool _lengthOverLimit;
+
+    // Length for the combined scope is meaningless (User and System are separate
+    // variables), so the tile is hidden unless a single scope is selected.
+    public bool ShowLength => Scope != DashboardScope.Combined;
 
     public DashboardViewModel(
         PathListViewModel userPaths, PathListViewModel systemPaths, ConflictsViewModel conflicts)
@@ -37,7 +40,11 @@ public partial class DashboardViewModel : ObservableObject
         _conflicts = conflicts;
     }
 
-    partial void OnScopeChanged(DashboardScope value) => Refresh();
+    partial void OnScopeChanged(DashboardScope value)
+    {
+        OnPropertyChanged(nameof(ShowLength));
+        Refresh();
+    }
 
     public void Refresh()
     {
@@ -50,19 +57,6 @@ public partial class DashboardViewModel : ObservableObject
         TotalLength = ScopedLength();
         LengthLabel = $"{TotalLength} / {PathLimit}";
         LengthOverLimit = TotalLength >= PathLimit;
-
-        Health = ComputeHealth(entries);
-    }
-
-    // Worst severity wins: any High-confidence flag -> "Needs attention";
-    // else any Low flag -> "Minor issues"; else "Healthy".
-    private static string ComputeHealth(IReadOnlyList<PathEntry> entries)
-    {
-        if (entries.Any(e => e.Confidence == FlagConfidence.High))
-            return "Needs attention";
-        if (entries.Any(e => e.Confidence == FlagConfidence.Low))
-            return "Minor issues";
-        return "Healthy";
     }
 
     private IEnumerable<PathEntry> ScopedEntries() => Scope switch

@@ -21,8 +21,10 @@ public partial class SaveDiffDialog : Window
         var lines = diff.Changes
             .OrderBy(c => c.Kind)
             .Select(c => c.Kind == PathChangeKind.Added
-                ? new DiffLine($"+ {c.Path}", AddBrush)
-                : new DiffLine($"- {c.Path}", RemoveBrush))
+                ? new DiffLine($"+ {c.DisplayPath}", AddBrush)
+                : new DiffLine(
+                    c.Reason is null ? $"- {c.DisplayPath}" : $"- {c.DisplayPath}  ({c.Reason})",
+                    RemoveBrush))
             .ToList();
 
         var requiresElevation = diff.Scope == PathScope.System && diff.HasChanges;
