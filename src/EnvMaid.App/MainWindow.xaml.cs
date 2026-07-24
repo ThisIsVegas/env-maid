@@ -18,6 +18,27 @@ public partial class MainWindow : Window
             var dialog = new SaveDiffDialog(diffs) { Owner = this };
             return dialog.ShowDialog() == true;
         };
+        _viewModel.PickExportFile = () =>
+        {
+            var dialog = new Microsoft.Win32.SaveFileDialog
+            {
+                Title = "Export PATH profile",
+                Filter = "PATH profile (*.json)|*.json|All files (*.*)|*.*",
+                FileName = $"envmaid-path-{DateTime.Now:yyyyMMdd}.json",
+                DefaultExt = ".json",
+            };
+            return dialog.ShowDialog(this) == true ? dialog.FileName : null;
+        };
+        _viewModel.PickImportFile = () =>
+        {
+            var dialog = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "Import PATH profile",
+                Filter = "PATH profile (*.json)|*.json|All files (*.*)|*.*",
+                CheckFileExists = true,
+            };
+            return dialog.ShowDialog(this) == true ? dialog.FileName : null;
+        };
         DataContext = _viewModel;
     }
 
