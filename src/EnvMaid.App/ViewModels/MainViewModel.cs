@@ -27,6 +27,9 @@ public partial class MainViewModel : ObservableObject
         UserPaths = new PathListViewModel(PathScope.User);
         SystemPaths = new PathListViewModel(PathScope.System);
 
+        UserPaths.Entries.CollectionChanged += (_, _) => RecalculateGlobalRank();
+        SystemPaths.Entries.CollectionChanged += (_, _) => RecalculateGlobalRank();
+
         Rescan();
     }
 
@@ -39,8 +42,19 @@ public partial class MainViewModel : ObservableObject
         _orphanService.ApplyFlags(UserPaths.Entries.ToList(), SystemPaths.Entries.ToList());
         UserPaths.RecalculateLength();
         SystemPaths.RecalculateLength();
+        RecalculateGlobalRank();
 
         StatusMessage = "Scan complete.";
+    }
+
+    private void RecalculateGlobalRank()
+    {
+        // Real PATH resolution order: System entries first, then User entries appended.
+        var rank = 1;
+        foreach (var entry in SystemPaths.Entries)
+            entry.GlobalRank = rank++;
+        foreach (var entry in UserPaths.Entries)
+            entry.GlobalRank = rank++;
     }
 
     [RelayCommand]
