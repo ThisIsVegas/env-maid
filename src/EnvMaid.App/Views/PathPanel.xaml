@@ -1,0 +1,98 @@
+<UserControl x:Class="EnvMaid.App.Views.PathPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:conv="clr-namespace:EnvMaid.App.Converters"
+             xmlns:beh="clr-namespace:EnvMaid.App.Behaviors">
+
+    <UserControl.Resources>
+        <conv:ConfidenceToBrushConverter x:Key="ConfidenceToBrush"/>
+        <conv:LengthToWidthConverter x:Key="LengthToWidth"/>
+
+        <Style x:Key="SmallButton" TargetType="Button">
+            <Setter Property="Background" Value="#313244"/>
+            <Setter Property="Foreground" Value="#CDD6F4"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="10,5"/>
+            <Setter Property="Margin" Value="0,0,8,0"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="4" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#45475A"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style TargetType="ListView">
+            <Setter Property="Background" Value="#181825"/>
+            <Setter Property="Foreground" Value="#CDD6F4"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="FontSize" Value="13"/>
+        </Style>
+
+        <Style TargetType="GridViewColumnHeader">
+            <Setter Property="Background" Value="#313244"/>
+            <Setter Property="Foreground" Value="#A6ADC8"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="BorderThickness" Value="0,0,1,1"/>
+            <Setter Property="BorderBrush" Value="#181825"/>
+        </Style>
+
+        <Style TargetType="ListViewItem">
+            <Setter Property="Background" Value="{Binding Confidence, Converter={StaticResource ConfidenceToBrush}}"/>
+            <Setter Property="Padding" Value="4"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+            <Setter Property="BorderBrush" Value="#313244"/>
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="#45475A"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </UserControl.Resources>
+
+    <DockPanel Margin="0,10,0,0">
+        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+            <TextBlock Text="{Binding LengthLabel}" Foreground="#A6ADC8" FontSize="12" Margin="0,0,0,4"/>
+            <Border Height="6" Background="#313244" CornerRadius="3" HorizontalAlignment="Stretch">
+                <Border Height="6" HorizontalAlignment="Left" CornerRadius="3"
+                        Width="{Binding TotalLength, Converter={StaticResource LengthToWidth}}"
+                        Background="{Binding BarColor}" Margin="0"/>
+            </Border>
+        </StackPanel>
+
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,10,0,0">
+            <Button Content="Add" Style="{StaticResource SmallButton}" Command="{Binding AddCommand}"/>
+            <Button Content="Edit" Style="{StaticResource SmallButton}" Command="{Binding EditCommand}"/>
+            <Button Content="Remove" Style="{StaticResource SmallButton}" Command="{Binding RemoveCommand}"/>
+            <Button Content="Move Up" Style="{StaticResource SmallButton}" Command="{Binding MoveUpCommand}"/>
+            <Button Content="Move Down" Style="{StaticResource SmallButton}" Command="{Binding MoveDownCommand}"/>
+        </StackPanel>
+
+        <ListView ItemsSource="{Binding Entries}" SelectedItem="{Binding SelectedEntry}"
+                  beh:ListViewDragDropReorder.IsEnabled="True">
+            <ListView.View>
+                <GridView>
+                    <GridViewColumn Header="✓" Width="34">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate>
+                                <CheckBox IsChecked="{Binding IsChecked}" HorizontalAlignment="Center"/>
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
+                    <GridViewColumn Header="Path" DisplayMemberBinding="{Binding Path}" Width="640"/>
+                    <GridViewColumn Header="Reason" DisplayMemberBinding="{Binding Reason}" Width="300"/>
+                </GridView>
+            </ListView.View>
+        </ListView>
+    </DockPanel>
+</UserControl>
