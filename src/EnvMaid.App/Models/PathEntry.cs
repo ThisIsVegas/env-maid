@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace EnvMaid.App.Models;
@@ -16,11 +17,19 @@ public partial class PathEntry : ObservableObject
     [ObservableProperty]
     private bool _isChecked;
 
+    [ObservableProperty]
+    private bool _isExpanded;
+
+    public ObservableCollection<ShadowConflict> ShadowConflicts { get; } = new();
+
+    public bool HasShadowConflicts => ShadowConflicts.Count > 0;
+
     public PathScope Scope { get; }
 
     public PathEntry(string path, PathScope scope)
     {
         _path = path;
         Scope = scope;
+        ShadowConflicts.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasShadowConflicts));
     }
 }
