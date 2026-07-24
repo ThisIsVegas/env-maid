@@ -59,10 +59,18 @@ public partial class MainViewModel : ObservableObject
         var backupFile = _backupService.CreateBackup(currentUser, currentSystem);
 
         _envService.SetEntries(PathScope.User, UserPaths.Entries.Select(e => e.Path));
-        _envService.SetEntries(PathScope.System, SystemPaths.Entries.Select(e => e.Path));
+
+        var systemEntries = SystemPaths.Entries.Select(e => e.Path).ToList();
+        var systemResult = ApplySystemPathIfChanged(currentSystem, systemEntries);
+
         _envService.BroadcastEnvironmentChange();
 
-        StatusMessage = $"Saved. Backup: {Path.GetFileName(backupFile)}";
+        StatusMessage = systemResult switch
+        {
+            SystemPathApplyResult.NotChanged => $"Saved. Backup: {Path.GetFileName(backupFile)}",
+            SystemPathApplyResult.Applied => $"Saved (including System PATH). Backup: {Path.GetFileName(backupFile)}",
+            _ => $"User PATH saved. System PATH not applied (elevation cancelled or failed). Backup: {Path.GetFileName(backupFile)}",
+        };
         Rescan();
     }
 
@@ -82,11 +90,37 @@ public partial class MainViewModel : ObservableObject
         var systemEntries = backup.SystemPath.Length > 0 ? backup.SystemPath.Split(';') : Array.Empty<string>();
 
         _envService.SetEntries(PathScope.User, userEntries);
-        _envService.SetEntries(PathScope.System, systemEntries);
+
+        var currentSystem = _envService.GetEntries(PathScope.System);
+        var systemResult = ApplySystemPathIfChanged(currentSystem, systemEntries);
+
         _envService.BroadcastEnvironmentChange();
 
-        StatusMessage = $"Restored from {backupFileName}.";
+        StatusMessage = systemResult switch
+        {
+            SystemPathApplyResult.Failed => $"User PATH restored. System PATH not applied (elevation cancelled or failed).",
+            _ => $"Restored from {backupFileName}.",
+        };
         Rescan();
+    }
+
+    private enum SystemPathApplyResult { NotChanged, Applied, Failed }
+
+    private SystemPathApplyResult ApplySystemPathIfChanged(IReadOnlyList<string> currentSystem, IReadOnlyList<string> newSystem)
+    {
+        if (currentSystem.SequenceEqual(newSystem))
+            return SystemPathApplyResult.NotChanged;
+
+        if (EnvironmentPathService.IsAdministrator())
+        {
+            _envService.SetEntries(PathScope.System, newSystem);
+            return SystemPathApplyResult.Applied;
+        }
+
+        var joined = string.Join(';', newSystem);
+        return _envService.TryElevateSetSystemPath(joined)
+            ? SystemPathApplyResult.Applied
+            : SystemPathApplyResult.Failed;
     }
 
     public IReadOnlyList<string> GetBackupNames() =>

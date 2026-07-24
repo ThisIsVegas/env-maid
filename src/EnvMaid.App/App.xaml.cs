@@ -11,6 +11,12 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        if (TryRunElevatedHelper(e.Args))
+        {
+            Shutdown();
+            return;
+        }
+
         var envService = new EnvironmentPathService();
         var orphanService = new OrphanDetectionService();
         var backupService = new BackupService();
@@ -18,5 +24,30 @@ public partial class App : Application
 
         var window = new MainWindow(mainViewModel);
         window.Show();
+    }
+
+    /// <summary>
+    /// When relaunched elevated to write the System PATH, does just that and exits
+    /// without showing any window. Returns true if this process was such a relaunch.
+    /// </summary>
+    private static bool TryRunElevatedHelper(string[] args)
+    {
+        if (args.Length < 2 || args[0] != EnvironmentPathService.ElevatedSetSystemPathArg)
+            return false;
+
+        try
+        {
+            var envService = new EnvironmentPathService();
+            var entries = args[1].Length > 0 ? args[1].Split(';') : Array.Empty<string>();
+            envService.SetEntries(PathScope.System, entries);
+            envService.BroadcastEnvironmentChange();
+            Environment.ExitCode = 0;
+        }
+        catch
+        {
+            Environment.ExitCode = 1;
+        }
+
+        return true;
     }
 }
