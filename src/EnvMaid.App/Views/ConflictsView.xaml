@@ -37,14 +37,27 @@
             <ColumnDefinition Width="300"/>
             <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- CLI tool list toolbar -->
+        <StackPanel Grid.Row="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,10">
+            <TextBlock Text="Known CLI tools drive conflict confidence." Foreground="#6C7086"
+                       FontSize="12" VerticalAlignment="Center" Margin="0,0,12,0"/>
+            <Button Content="Edit my list" Style="{StaticResource ActionButton}" Click="OpenToolsFile_Click"/>
+            <Button Content="Reload" Style="{StaticResource ActionButton}" Click="ReloadTools_Click"/>
+            <Button Content="View built-in list" Style="{StaticResource ActionButton}" Click="ViewBuiltIn_Click"/>
+        </StackPanel>
 
         <!-- No-conflicts message -->
-        <TextBlock Grid.ColumnSpan="2" Text="No conflicts detected." Foreground="#A6E3A1"
+        <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="No conflicts detected." Foreground="#A6E3A1"
                    FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center"
                    Visibility="{Binding HasConflicts, Converter={StaticResource InverseBoolToVis}}"/>
 
         <!-- Master: group list -->
-        <ListBox Grid.Column="0" ItemsSource="{Binding Groups}" SelectedItem="{Binding SelectedGroup}"
+        <ListBox Grid.Row="1" Grid.Column="0" ItemsSource="{Binding Groups}" SelectedItem="{Binding SelectedGroup}"
                  Background="#181825" BorderThickness="0" Foreground="#CDD6F4"
                  Visibility="{Binding HasConflicts, Converter={StaticResource BoolToVis}}">
             <ListBox.ItemContainerStyle>
@@ -69,7 +82,7 @@
         </ListBox>
 
         <!-- Detail: selected group -->
-        <ScrollViewer Grid.Column="1" Margin="16,0,0,0" VerticalScrollBarVisibility="Auto"
+        <ScrollViewer Grid.Row="1" Grid.Column="1" Margin="16,0,0,0" VerticalScrollBarVisibility="Auto"
                       Visibility="{Binding HasConflicts, Converter={StaticResource BoolToVis}}">
             <StackPanel>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,12"

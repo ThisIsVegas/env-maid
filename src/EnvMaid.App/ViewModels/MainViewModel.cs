@@ -12,6 +12,7 @@ public partial class MainViewModel : ObservableObject
     private readonly OrphanDetectionService _orphanService;
     private readonly BackupService _backupService;
     private readonly PathDiffService _diffService;
+    private readonly CliToolListService _cliTools;
 
     /// <summary>Shows the save-diff confirm gate. Returns true to proceed with the
     /// write. Set by the view; if null, the save proceeds without confirmation.</summary>
@@ -30,12 +31,14 @@ public partial class MainViewModel : ObservableObject
         OrphanDetectionService orphanService,
         ConflictAnalysisService conflictAnalysisService,
         BackupService backupService,
-        PathDiffService diffService)
+        PathDiffService diffService,
+        CliToolListService cliTools)
     {
         _envService = envService;
         _orphanService = orphanService;
         _backupService = backupService;
         _diffService = diffService;
+        _cliTools = cliTools;
 
         UserPaths = new PathListViewModel(PathScope.User);
         SystemPaths = new PathListViewModel(PathScope.System);
@@ -79,6 +82,19 @@ public partial class MainViewModel : ObservableObject
             entry.GlobalRank = rank++;
         foreach (var entry in UserPaths.Entries)
             entry.GlobalRank = rank++;
+    }
+
+    public string CliToolsFilePath => _cliTools.UserFilePath;
+
+    public IReadOnlyCollection<string> BuiltInCliTools => _cliTools.BuiltInNames;
+
+    /// <summary>Re-read the user CLI-tools file and re-rank conflicts against it.</summary>
+    [RelayCommand]
+    private void ReloadCliTools()
+    {
+        _cliTools.Reload();
+        Rescan();
+        StatusMessage = "CLI tool list reloaded.";
     }
 
     [RelayCommand]

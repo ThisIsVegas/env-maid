@@ -24,7 +24,7 @@ public partial class App : Application
         var conflictAnalysisService = new ConflictAnalysisService(ranker);
         var backupService = new BackupService();
         var diffService = new PathDiffService();
-        var mainViewModel = new MainViewModel(envService, orphanService, conflictAnalysisService, backupService, diffService);
+        var mainViewModel = new MainViewModel(envService, orphanService, conflictAnalysisService, backupService, diffService, cliToolListService);
 
         var window = new MainWindow(mainViewModel);
         window.Show();
