@@ -93,6 +93,15 @@
             <Button Content="Remove" Style="{StaticResource SmallButton}" Command="{Binding RemoveCommand}"/>
             <Button Content="Move Up" Style="{StaticResource SmallButton}" Command="{Binding MoveUpCommand}"/>
             <Button Content="Move Down" Style="{StaticResource SmallButton}" Command="{Binding MoveDownCommand}"/>
+            <Border Width="1" Background="#313244" Margin="4,2,12,2"/>
+            <Button Content="Normalize" Style="{StaticResource SmallButton}" Command="{Binding NormalizeCommand}"
+                    ToolTip="Canonicalize entries (trailing slash, redundant segments); leaves %VARS% intact"/>
+            <Button Content="Remove Duplicates" Style="{StaticResource SmallButton}" Command="{Binding RemoveDuplicatesCommand}"
+                    ToolTip="Remove repeated folders within this scope (first kept)"/>
+            <Button Content="Remove Broken" Style="{StaticResource SmallButton}" Command="{Binding RemoveBrokenCommand}"
+                    ToolTip="Remove entries whose folder is missing or empty"/>
+            <Button Content="Compress" Style="{StaticResource SmallButton}" Command="{Binding CompressCommand}"
+                    ToolTip="Shorten entries using %LOCALAPPDATA%, %ProgramFiles%, etc. to fit the 2047-char limit"/>
         </StackPanel>
 
         <DataGrid ItemsSource="{Binding Entries}" SelectedItem="{Binding SelectedEntry}"

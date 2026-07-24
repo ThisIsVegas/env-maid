@@ -15,6 +15,9 @@ public partial class PathListViewModel : ObservableObject
     private const int PathLimit = 2047;
     private const int WarningThreshold = 1800;
 
+    private readonly PathNormalizer _normalizer;
+    private readonly PathCompressor _compressor;
+
     public PathScope Scope { get; }
 
     public ObservableCollection<PathEntry> Entries { get; } = new();
@@ -36,8 +39,15 @@ public partial class PathListViewModel : ObservableObject
     private Brush _barColor = GreenBrush;
 
     public PathListViewModel(PathScope scope)
+        : this(scope, new PathNormalizer(), new PathCompressor())
+    {
+    }
+
+    public PathListViewModel(PathScope scope, PathNormalizer normalizer, PathCompressor compressor)
     {
         Scope = scope;
+        _normalizer = normalizer;
+        _compressor = compressor;
         Entries.CollectionChanged += (_, _) => RecalculateLength();
     }
 
@@ -87,6 +97,53 @@ public partial class PathListViewModel : ObservableObject
     {
         foreach (var entry in Entries.Where(e => e.IsChecked).ToList())
             Entries.Remove(entry);
+    }
+
+    /// <summary>Rewrite every entry to its canonical form (trailing slash / redundant
+    /// segments), leaving %VAR% references intact. Staged only — committed on Save.</summary>
+    [RelayCommand]
+    private void Normalize()
+    {
+        foreach (var entry in Entries)
+        {
+            var normalized = _normalizer.Normalize(entry.Path);
+            if (normalized != entry.Path)
+                entry.Path = normalized;
+        }
+    }
+
+    /// <summary>Remove entries that repeat an earlier one in THIS scope (first kept),
+    /// comparing by canonical form so trailing-slash/case variants collapse together.</summary>
+    [RelayCommand]
+    private void RemoveDuplicates()
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in Entries.ToList())
+            if (!seen.Add(_normalizer.Normalize(entry.Path)))
+                Entries.Remove(entry);
+    }
+
+    /// <summary>Remove entries whose folder is missing or empty (the High-confidence
+    /// broken flags). Leaves NoExecutable (Low-confidence) entries alone.</summary>
+    [RelayCommand]
+    private void RemoveBroken()
+    {
+        foreach (var entry in Entries.Where(e =>
+                     e.Flags.HasFlag(PathFlag.Missing) || e.Flags.HasFlag(PathFlag.Empty)).ToList())
+            Entries.Remove(entry);
+    }
+
+    /// <summary>Fold known Windows variables back into literal entries (e.g. %LOCALAPPDATA%)
+    /// to reclaim room under the 2047-character limit. Staged only — committed on Save.</summary>
+    [RelayCommand]
+    private void Compress()
+    {
+        foreach (var entry in Entries)
+        {
+            var compressed = _compressor.Compress(entry.Path);
+            if (compressed != entry.Path)
+                entry.Path = compressed;
+        }
     }
 
     [RelayCommand]
