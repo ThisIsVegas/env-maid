@@ -52,7 +52,12 @@ public partial class DashboardViewModel : ObservableObject
 
         BrokenCount = entries.Count(e => e.Flags.HasFlag(PathFlag.Missing) || e.Flags.HasFlag(PathFlag.Empty));
         DuplicateCount = entries.Count(e => e.Flags.HasFlag(PathFlag.Duplicate));
-        ConflictCount = _conflicts.ConflictCount;
+        ConflictCount = Scope switch
+        {
+            DashboardScope.User => _conflicts.ConflictCountForScope(PathScope.User),
+            DashboardScope.System => _conflicts.ConflictCountForScope(PathScope.System),
+            _ => _conflicts.ConflictCount,
+        };
 
         TotalLength = ScopedLength();
         LengthLabel = $"{TotalLength} / {PathLimit}";

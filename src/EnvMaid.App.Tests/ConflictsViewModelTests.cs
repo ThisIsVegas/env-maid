@@ -108,6 +108,48 @@ public class ConflictsViewModelTests
         Assert.False(loser.CanReorder);
     }
 
+    [Fact]
+    public void ConflictCountForScope_CrossScopeGroup_CountsForBothScopes()
+    {
+        var sysDir = CreateTempDir();
+        var userDir = CreateTempDir();
+        File.WriteAllText(Path.Combine(sysDir, "python.exe"), "s");
+        File.WriteAllText(Path.Combine(userDir, "python.exe"), "user longer");
+
+        var user = new PathListViewModel(PathScope.User);
+        var system = new PathListViewModel(PathScope.System);
+        user.LoadEntries(new[] { userDir });
+        system.LoadEntries(new[] { sysDir });
+
+        var vm = new ConflictsViewModel(Analysis(), user, system);
+        vm.Refresh();
+
+        // The single group has a System winner and a User loser, so it is relevant
+        // to both scope views — not just the combined total.
+        Assert.Equal(1, vm.ConflictCount);
+        Assert.Equal(1, vm.ConflictCountForScope(PathScope.User));
+        Assert.Equal(1, vm.ConflictCountForScope(PathScope.System));
+    }
+
+    [Fact]
+    public void ConflictCountForScope_SingleScopeGroup_CountsOnlyForThatScope()
+    {
+        var winnerDir = CreateTempDir();
+        var loserDir = CreateTempDir();
+        File.WriteAllText(Path.Combine(winnerDir, "git.exe"), "w");
+        File.WriteAllText(Path.Combine(loserDir, "git.exe"), "loser bigger");
+
+        var user = new PathListViewModel(PathScope.User);
+        var system = new PathListViewModel(PathScope.System);
+        user.LoadEntries(new[] { winnerDir, loserDir }); // both folders in User scope
+
+        var vm = new ConflictsViewModel(Analysis(), user, system);
+        vm.Refresh();
+
+        Assert.Equal(1, vm.ConflictCountForScope(PathScope.User));
+        Assert.Equal(0, vm.ConflictCountForScope(PathScope.System));
+    }
+
     private static string CreateTempDir()
     {
         var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
