@@ -7,6 +7,8 @@
     <UserControl.Resources>
         <conv:ConfidenceToBrushConverter x:Key="ConfidenceToBrush"/>
         <conv:LengthToWidthConverter x:Key="LengthToWidth"/>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
+        <conv:PathExistsConverter x:Key="PathExists"/>
 
         <Style x:Key="SmallButton" TargetType="Button">
             <Setter Property="Background" Value="#313244"/>
@@ -32,14 +34,20 @@
             </Style.Triggers>
         </Style>
 
-        <Style TargetType="ListView">
+        <Style TargetType="DataGrid">
             <Setter Property="Background" Value="#181825"/>
             <Setter Property="Foreground" Value="#CDD6F4"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="FontSize" Value="13"/>
+            <Setter Property="AutoGenerateColumns" Value="False"/>
+            <Setter Property="CanUserAddRows" Value="False"/>
+            <Setter Property="CanUserSortColumns" Value="False"/>
+            <Setter Property="HeadersVisibility" Value="Column"/>
+            <Setter Property="GridLinesVisibility" Value="None"/>
+            <Setter Property="RowDetailsVisibilityMode" Value="Collapsed"/>
         </Style>
 
-        <Style TargetType="GridViewColumnHeader">
+        <Style TargetType="DataGridColumnHeader">
             <Setter Property="Background" Value="#313244"/>
             <Setter Property="Foreground" Value="#A6ADC8"/>
             <Setter Property="Padding" Value="8,6"/>
@@ -47,11 +55,12 @@
             <Setter Property="BorderBrush" Value="#181825"/>
         </Style>
 
-        <Style TargetType="ListViewItem">
+        <Style TargetType="DataGridRow">
             <Setter Property="Background" Value="{Binding Confidence, Converter={StaticResource ConfidenceToBrush}}"/>
             <Setter Property="Padding" Value="4"/>
             <Setter Property="BorderThickness" Value="0,0,0,1"/>
             <Setter Property="BorderBrush" Value="#313244"/>
+            <Setter Property="DetailsVisibility" Value="{Binding IsExpanded, Converter={StaticResource BoolToVisibility}}"/>
             <Style.Triggers>
                 <Trigger Property="IsSelected" Value="True">
                     <Setter Property="Background" Value="#45475A"/>
@@ -78,21 +87,99 @@
             <Button Content="Move Down" Style="{StaticResource SmallButton}" Command="{Binding MoveDownCommand}"/>
         </StackPanel>
 
-        <ListView ItemsSource="{Binding Entries}" SelectedItem="{Binding SelectedEntry}"
-                  beh:ListViewDragDropReorder.IsEnabled="True">
-            <ListView.View>
-                <GridView>
-                    <GridViewColumn Header="✓" Width="34">
-                        <GridViewColumn.CellTemplate>
+        <DataGrid ItemsSource="{Binding Entries}" SelectedItem="{Binding SelectedEntry}"
+                  beh:DataGridDragDropReorder.IsEnabled="True">
+            <DataGrid.Resources>
+                <Style TargetType="DataGridCell">
+                    <Setter Property="Background" Value="Transparent"/>
+                    <Setter Property="BorderThickness" Value="0"/>
+                </Style>
+            </DataGrid.Resources>
+            <DataGrid.RowDetailsTemplate>
+                <DataTemplate>
+                    <ItemsControl ItemsSource="{Binding ShadowConflicts}" Margin="34,4,4,4">
+                        <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <CheckBox IsChecked="{Binding IsChecked}" HorizontalAlignment="Center"/>
+                                <Border Background="#11181825" Padding="6,3" Margin="0,0,0,2"
+                                        Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=DataGrid}}">
+                                    <Border.ContextMenu>
+                                        <ContextMenu>
+                                            <MenuItem Header="Open shadowing folder in Explorer"
+                                                      Command="{Binding PlacementTarget.Tag.OpenShadowFolderCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                      CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                            <MenuItem Header="Copy exe name"
+                                                      Command="{Binding PlacementTarget.Tag.CopyExeNameCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                      CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                            <MenuItem Header="Copy winning folder path"
+                                                      Command="{Binding PlacementTarget.Tag.CopyShadowedFolderPathCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                      CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                            <Separator/>
+                                            <MenuItem Header="{Binding PlacementTarget.DataContext.ExeName, RelativeSource={RelativeSource AncestorType=ContextMenu}, StringFormat='Search: multiple {0} versions'}"
+                                                      Command="{Binding PlacementTarget.Tag.SearchMultipleVersionsCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                      CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                        </ContextMenu>
+                                    </Border.ContextMenu>
+                                    <TextBlock Foreground="#CDD6F4" FontSize="12">
+                                        <Run Text="{Binding ExeName, Mode=OneWay}" FontWeight="SemiBold"/>
+                                        <Run Text=" — shadowed by "/>
+                                        <Run Text="{Binding ShadowedFolderPath, Mode=OneWay}"/>
+                                    </TextBlock>
+                                </Border>
                             </DataTemplate>
-                        </GridViewColumn.CellTemplate>
-                    </GridViewColumn>
-                    <GridViewColumn Header="Path" DisplayMemberBinding="{Binding Path}" Width="640"/>
-                    <GridViewColumn Header="Reason" DisplayMemberBinding="{Binding Reason}" Width="300"/>
-                </GridView>
-            </ListView.View>
-        </ListView>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </DataTemplate>
+            </DataGrid.RowDetailsTemplate>
+            <DataGrid.RowStyle>
+                <Style TargetType="DataGridRow" BasedOn="{StaticResource {x:Type DataGridRow}}">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                            <Setter Property="DetailsVisibility" Value="Visible"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </DataGrid.RowStyle>
+            <DataGrid.Columns>
+                <DataGridTemplateColumn Header="✓" Width="34">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <CheckBox IsChecked="{Binding IsChecked}" HorizontalAlignment="Center"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="⚠" Width="40">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <ToggleButton IsChecked="{Binding IsExpanded}"
+                                          Visibility="{Binding HasShadowConflicts, Converter={StaticResource BoolToVisibility}}"
+                                          Content="{Binding ShadowConflicts.Count, StringFormat='⚠ {0}'}"
+                                          Background="Transparent" BorderThickness="0" Foreground="#FAB387" Cursor="Hand"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Path" Binding="{Binding Path}" Width="580" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Reason" Binding="{Binding Reason}" Width="270" IsReadOnly="True"/>
+            </DataGrid.Columns>
+            <DataGrid.ContextMenu>
+                <ContextMenu>
+                    <MenuItem Header="Edit"
+                              Command="{Binding PlacementTarget.DataContext.EditCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                    <MenuItem Header="Remove"
+                              Command="{Binding PlacementTarget.DataContext.RemoveCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                    <MenuItem Header="Move Up"
+                              Command="{Binding PlacementTarget.DataContext.MoveUpCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                    <MenuItem Header="Move Down"
+                              Command="{Binding PlacementTarget.DataContext.MoveDownCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                    <Separator/>
+                    <MenuItem Header="Open in Explorer"
+                              Command="{Binding PlacementTarget.DataContext.OpenInExplorerCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                              CommandParameter="{Binding PlacementTarget.SelectedItem, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                              IsEnabled="{Binding PlacementTarget.SelectedItem.Path, RelativeSource={RelativeSource AncestorType=ContextMenu}, Converter={StaticResource PathExists}}"/>
+                    <MenuItem Header="Copy Path"
+                              Command="{Binding PlacementTarget.DataContext.CopyPathCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                              CommandParameter="{Binding PlacementTarget.SelectedItem, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                </ContextMenu>
+            </DataGrid.ContextMenu>
+        </DataGrid>
     </DockPanel>
 </UserControl>
