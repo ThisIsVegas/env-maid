@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 
@@ -24,11 +25,18 @@ public static class DataGridDragDropReorder
         if (d is not DataGrid grid || e.NewValue is not true) return;
 
         grid.AllowDrop = true;
-        grid.PreviewMouseLeftButtonDown += (_, args) => _dragStart = args.GetPosition(null);
+        var pressedOnInteractiveControl = false;
+
+        grid.PreviewMouseLeftButtonDown += (_, args) =>
+        {
+            _dragStart = args.GetPosition(null);
+            pressedOnInteractiveControl = IsOnInteractiveControl(args.OriginalSource as DependencyObject);
+        };
 
         grid.PreviewMouseMove += (_, args) =>
         {
             if (args.LeftButton != MouseButtonState.Pressed) return;
+            if (pressedOnInteractiveControl) return;
 
             var current = args.GetPosition(null);
             var diff = _dragStart - current;
@@ -66,5 +74,16 @@ public static class DataGridDragDropReorder
             source = VisualTreeHelper.GetParent(source);
 
         return source as DataGridRow;
+    }
+
+    private static bool IsOnInteractiveControl(DependencyObject? source)
+    {
+        while (source is not null && source is not DataGridRow)
+        {
+            if (source is ToggleButton or CheckBox or TextBox)
+                return true;
+            source = VisualTreeHelper.GetParent(source);
+        }
+        return false;
     }
 }
