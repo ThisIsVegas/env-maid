@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Media3D;
 
 namespace EnvMaid.App.Behaviors;
 
@@ -71,19 +72,29 @@ public static class DataGridDragDropReorder
     private static DataGridRow? FindDataGridRow(DependencyObject? source)
     {
         while (source is not null && source is not DataGridRow)
-            source = VisualTreeHelper.GetParent(source);
+            source = GetParent(source);
 
         return source as DataGridRow;
     }
 
     private static bool IsOnInteractiveControl(DependencyObject? source)
     {
-        while (source is not null && source is not DataGridRow)
+        // Walk all the way to the root (not stopping at DataGridRow): the tree can hop
+        // between visual and logical trees, and stopping early can miss an interactive
+        // ancestor, letting a drag hijack a button/checkbox click.
+        while (source is not null)
         {
-            if (source is ToggleButton or CheckBox or TextBox)
+            if (source is ButtonBase or CheckBox or TextBox)
                 return true;
-            source = VisualTreeHelper.GetParent(source);
+            source = GetParent(source);
         }
         return false;
     }
+
+    // OriginalSource can be a ContentElement (e.g. a Run), which is not a Visual;
+    // VisualTreeHelper.GetParent throws on those, so fall back to the logical tree.
+    private static DependencyObject? GetParent(DependencyObject source) =>
+        source is Visual or Visual3D
+            ? VisualTreeHelper.GetParent(source)
+            : LogicalTreeHelper.GetParent(source);
 }
