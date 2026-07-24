@@ -85,7 +85,7 @@ public class OrphanDetectionService
 
         foreach (var entry in scopeEntries)
         {
-            var (existenceReason, existenceConfidence) = CheckExistence(entry.Path);
+            var (existenceReason, existenceConfidence, existenceFlag) = CheckExistence(entry.Path);
             var normalized = Normalize(entry.Path);
             var group = byNormalized[normalized];
 
@@ -97,6 +97,8 @@ public class OrphanDetectionService
             if (duplicateReason is not null) reasonParts.Add(duplicateReason);
 
             entry.Reason = string.Join("; ", reasonParts);
+
+            entry.Flags = existenceFlag | (duplicateReason is not null ? PathFlag.Duplicate : PathFlag.None);
 
             entry.Confidence = duplicateReason is not null
                 ? FlagConfidence.High
@@ -115,23 +117,23 @@ public class OrphanDetectionService
         return "Duplicate entry";
     }
 
-    private (string? Reason, FlagConfidence Confidence) CheckExistence(string path)
+    private (string? Reason, FlagConfidence Confidence, PathFlag Flag) CheckExistence(string path)
     {
         var expanded = Environment.ExpandEnvironmentVariables(path);
 
         if (string.IsNullOrWhiteSpace(expanded))
-            return ("Empty entry", FlagConfidence.High);
+            return ("Empty entry", FlagConfidence.High, PathFlag.Empty);
 
         if (!Directory.Exists(expanded))
-            return ("Folder does not exist", FlagConfidence.High);
+            return ("Folder does not exist", FlagConfidence.High, PathFlag.Missing);
 
         var hasExecutable = Directory.EnumerateFiles(expanded)
             .Any(f => ExecutableExtensions.Contains(Path.GetExtension(f)));
 
         if (!hasExecutable)
-            return ("No executable-type files found", FlagConfidence.Low);
+            return ("No executable-type files found", FlagConfidence.Low, PathFlag.NoExecutable);
 
-        return (null, FlagConfidence.None);
+        return (null, FlagConfidence.None, PathFlag.None);
     }
 
     private static string Normalize(string path)

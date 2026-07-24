@@ -15,6 +15,9 @@ public partial class PathEntry : ObservableObject
     private FlagConfidence _confidence = FlagConfidence.None;
 
     [ObservableProperty]
+    private PathFlag _flags = PathFlag.None;
+
+    [ObservableProperty]
     private bool _isChecked;
 
     [ObservableProperty]
