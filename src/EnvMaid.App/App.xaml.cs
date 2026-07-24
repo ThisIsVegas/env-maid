@@ -18,9 +18,13 @@ public partial class App : Application
         }
 
         var envService = new EnvironmentPathService();
-        var orphanService = new OrphanDetectionService();
+        var cliToolListService = new CliToolListService();
+        var ranker = new ConflictRanker(cliToolListService);
+        var orphanService = new OrphanDetectionService(ranker);
+        var conflictAnalysisService = new ConflictAnalysisService(ranker);
         var backupService = new BackupService();
-        var mainViewModel = new MainViewModel(envService, orphanService, backupService);
+        var diffService = new PathDiffService();
+        var mainViewModel = new MainViewModel(envService, orphanService, conflictAnalysisService, backupService, diffService, cliToolListService);
 
         var window = new MainWindow(mainViewModel);
         window.Show();

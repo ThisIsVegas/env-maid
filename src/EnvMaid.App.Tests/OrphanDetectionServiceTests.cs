@@ -6,7 +6,10 @@ namespace EnvMaid.App.Tests;
 
 public class OrphanDetectionServiceTests
 {
-    private readonly OrphanDetectionService _sut = new();
+    // Point the CLI-tool list at a nonexistent user file so tests depend only on
+    // the built-in allowlist, not on whatever is in the real %APPDATA%.
+    private readonly OrphanDetectionService _sut = new(new ConflictRanker(
+        new CliToolListService(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".txt"))));
 
     [Fact]
     public void ApplyFlags_EmptyPath_FlagsHighConfidence()
@@ -135,8 +138,8 @@ public class OrphanDetectionServiceTests
     {
         var dirA = CreateTempDir();
         var dirB = CreateTempDir();
-        File.WriteAllText(Path.Combine(dirA, "java.exe"), "hi");
-        File.WriteAllText(Path.Combine(dirB, "java.exe"), "hi");
+        File.WriteAllText(Path.Combine(dirA, "java.exe"), "version A");
+        File.WriteAllText(Path.Combine(dirB, "java.exe"), "different version B");
         var user = new List<PathEntry>
         {
             new(dirA, PathScope.User),
@@ -152,6 +155,8 @@ public class OrphanDetectionServiceTests
         var conflict = Assert.Single(user[1].ShadowConflicts);
         Assert.Equal("java.exe", conflict.ExeName);
         Assert.Equal(dirA, conflict.ShadowedFolderPath);
+        // java is a known CLI tool and the two files differ in size -> likely real.
+        Assert.Equal(ConflictConfidence.LikelyReal, conflict.Confidence);
     }
 
     [Fact]
@@ -190,6 +195,52 @@ public class OrphanDetectionServiceTests
 
         Assert.Equal(string.Empty, user[0].Reason);
         Assert.Equal(string.Empty, user[1].Reason);
+    }
+
+    [Fact]
+    public void ApplyFlags_ShadowedUninstaller_RankedLikelyFalsePositive()
+    {
+        var dirA = CreateTempDir();
+        var dirB = CreateTempDir();
+        File.WriteAllText(Path.Combine(dirA, "unins000.exe"), "a");
+        File.WriteAllText(Path.Combine(dirB, "unins000.exe"), "bb"); // different size
+        var user = new List<PathEntry> { new(dirA, PathScope.User), new(dirB, PathScope.User) };
+
+        _sut.ApplyFlags(user, []);
+
+        var conflict = Assert.Single(user[1].ShadowConflicts);
+        Assert.Equal(ConflictConfidence.LikelyFalsePositive, conflict.Confidence);
+    }
+
+    [Fact]
+    public void ApplyFlags_ByteIdenticalCopies_RankedLikelyFalsePositive()
+    {
+        // Same known CLI tool, but byte-identical files -> nobody cares which wins.
+        var dirA = CreateTempDir();
+        var dirB = CreateTempDir();
+        File.WriteAllText(Path.Combine(dirA, "node.exe"), "same");
+        File.WriteAllText(Path.Combine(dirB, "node.exe"), "same");
+        var user = new List<PathEntry> { new(dirA, PathScope.User), new(dirB, PathScope.User) };
+
+        _sut.ApplyFlags(user, []);
+
+        var conflict = Assert.Single(user[1].ShadowConflicts);
+        Assert.Equal(ConflictConfidence.LikelyFalsePositive, conflict.Confidence);
+    }
+
+    [Fact]
+    public void ApplyFlags_UnknownExeDifferentSizes_RankedPossibly()
+    {
+        var dirA = CreateTempDir();
+        var dirB = CreateTempDir();
+        File.WriteAllText(Path.Combine(dirA, "acme.exe"), "a");
+        File.WriteAllText(Path.Combine(dirB, "acme.exe"), "bb");
+        var user = new List<PathEntry> { new(dirA, PathScope.User), new(dirB, PathScope.User) };
+
+        _sut.ApplyFlags(user, []);
+
+        var conflict = Assert.Single(user[1].ShadowConflicts);
+        Assert.Equal(ConflictConfidence.Possibly, conflict.Confidence);
     }
 
     private static string CreateTempDir()

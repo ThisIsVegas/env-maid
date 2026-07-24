@@ -11,26 +11,51 @@ public partial class MainViewModel : ObservableObject
     private readonly EnvironmentPathService _envService;
     private readonly OrphanDetectionService _orphanService;
     private readonly BackupService _backupService;
+    private readonly PathDiffService _diffService;
+    private readonly CliToolListService _cliTools;
+
+    /// <summary>Shows the save-diff confirm gate. Returns true to proceed with the
+    /// write. Set by the view; if null, the save proceeds without confirmation.</summary>
+    public Func<IReadOnlyList<ScopeDiff>, bool>? ConfirmSave { get; set; }
 
     public PathListViewModel UserPaths { get; }
     public PathListViewModel SystemPaths { get; }
+    public ConflictsViewModel Conflicts { get; }
+    public DashboardViewModel Dashboard { get; }
 
     [ObservableProperty]
     private string _statusMessage = string.Empty;
 
-    public MainViewModel(EnvironmentPathService envService, OrphanDetectionService orphanService, BackupService backupService)
+    public MainViewModel(
+        EnvironmentPathService envService,
+        OrphanDetectionService orphanService,
+        ConflictAnalysisService conflictAnalysisService,
+        BackupService backupService,
+        PathDiffService diffService,
+        CliToolListService cliTools)
     {
         _envService = envService;
         _orphanService = orphanService;
         _backupService = backupService;
+        _diffService = diffService;
+        _cliTools = cliTools;
 
         UserPaths = new PathListViewModel(PathScope.User);
         SystemPaths = new PathListViewModel(PathScope.System);
+        Conflicts = new ConflictsViewModel(conflictAnalysisService, UserPaths, SystemPaths);
+        Dashboard = new DashboardViewModel(UserPaths, SystemPaths, Conflicts);
 
-        UserPaths.Entries.CollectionChanged += (_, _) => RecalculateGlobalRank();
-        SystemPaths.Entries.CollectionChanged += (_, _) => RecalculateGlobalRank();
+        UserPaths.Entries.CollectionChanged += (_, _) => OnEntriesChanged();
+        SystemPaths.Entries.CollectionChanged += (_, _) => OnEntriesChanged();
 
         Rescan();
+    }
+
+    private void OnEntriesChanged()
+    {
+        RecalculateGlobalRank();
+        Conflicts.Refresh();
+        Dashboard.Refresh();
     }
 
     [RelayCommand]
@@ -43,6 +68,8 @@ public partial class MainViewModel : ObservableObject
         UserPaths.RecalculateLength();
         SystemPaths.RecalculateLength();
         RecalculateGlobalRank();
+        Conflicts.Refresh();
+        Dashboard.Refresh();
 
         StatusMessage = "Scan complete.";
     }
@@ -55,6 +82,19 @@ public partial class MainViewModel : ObservableObject
             entry.GlobalRank = rank++;
         foreach (var entry in UserPaths.Entries)
             entry.GlobalRank = rank++;
+    }
+
+    public string CliToolsFilePath => _cliTools.UserFilePath;
+
+    public IReadOnlyCollection<string> BuiltInCliTools => _cliTools.BuiltInNames;
+
+    /// <summary>Re-read the user CLI-tools file and re-rank conflicts against it.</summary>
+    [RelayCommand]
+    private void ReloadCliTools()
+    {
+        _cliTools.Reload();
+        Rescan();
+        StatusMessage = "CLI tool list reloaded.";
     }
 
     [RelayCommand]
@@ -70,6 +110,27 @@ public partial class MainViewModel : ObservableObject
     {
         var currentUser = _envService.GetEntries(PathScope.User);
         var currentSystem = _envService.GetEntries(PathScope.System);
+
+        var stagedUser = UserPaths.Entries.Select(e => e.Path).ToList();
+        var stagedSystem = SystemPaths.Entries.Select(e => e.Path).ToList();
+        var diffs = new[]
+        {
+            _diffService.Diff(PathScope.User, currentUser, stagedUser),
+            _diffService.Diff(PathScope.System, currentSystem, stagedSystem),
+        };
+
+        if (diffs.All(d => !d.HasChanges))
+        {
+            StatusMessage = "No changes to save.";
+            return;
+        }
+
+        if (ConfirmSave is not null && !ConfirmSave(diffs))
+        {
+            StatusMessage = "Save cancelled.";
+            return;
+        }
+
         var backupFile = _backupService.CreateBackup(currentUser, currentSystem);
 
         _envService.SetEntries(PathScope.User, UserPaths.Entries.Select(e => e.Path));

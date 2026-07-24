@@ -10,6 +10,7 @@
         <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
         <conv:PathExistsConverter x:Key="PathExists"/>
         <conv:InverseBooleanToVisibilityConverter x:Key="InverseBoolToVisibility"/>
+        <conv:ConflictConfidenceConverter x:Key="ConflictConfidence"/>
 
         <Style x:Key="SmallButton" TargetType="Button">
             <Setter Property="Background" Value="#313244"/>
@@ -57,20 +58,14 @@
         </Style>
 
         <Style TargetType="DataGridRow">
+            <EventSetter Event="MouseDoubleClick" Handler="Row_MouseDoubleClick"/>
             <Setter Property="Background" Value="{Binding Confidence, Converter={StaticResource ConfidenceToBrush}}"/>
             <Setter Property="Padding" Value="4"/>
             <Setter Property="BorderThickness" Value="0,0,0,1"/>
             <Setter Property="BorderBrush" Value="#313244"/>
             <Style.Triggers>
-                <MultiDataTrigger>
-                    <MultiDataTrigger.Conditions>
-                        <Condition Binding="{Binding IsExpanded}" Value="False"/>
-                        <Condition Binding="{Binding IsLengthLimitBoundary}" Value="False"/>
-                    </MultiDataTrigger.Conditions>
+                <DataTrigger Binding="{Binding IsLengthLimitBoundary}" Value="False">
                     <Setter Property="DetailsVisibility" Value="Collapsed"/>
-                </MultiDataTrigger>
-                <DataTrigger Binding="{Binding IsExpanded}" Value="True">
-                    <Setter Property="DetailsVisibility" Value="Visible"/>
                 </DataTrigger>
                 <DataTrigger Binding="{Binding IsLengthLimitBoundary}" Value="True">
                     <Setter Property="DetailsVisibility" Value="Visible"/>
@@ -111,7 +106,7 @@
             <DataGrid.RowDetailsTemplate>
                 <DataTemplate>
                     <StackPanel Margin="34,6,4,6">
-                        <Border Background="#3A2C22" CornerRadius="3" Padding="8,6" Margin="0,0,0,6"
+                        <Border Background="#3A2C22" CornerRadius="3" Padding="8,6"
                                 Visibility="{Binding IsLengthLimitBoundary, Converter={StaticResource BoolToVisibility}}">
                             <TextBlock Foreground="#FAB387" FontSize="12" TextWrapping="Wrap">
                                 <Run Text="⚠ 2047-character PATH limit reached here." FontWeight="SemiBold"/>
@@ -119,42 +114,6 @@
                                 <Run Text="Entries below may not load in some tools/applications." Foreground="#CDD6F4"/>
                             </TextBlock>
                         </Border>
-                        <TextBlock Text="Executables shadowed by an earlier PATH folder:"
-                                   Foreground="#A6ADC8" FontSize="11" Margin="0,0,0,4"
-                                   Visibility="{Binding HasShadowConflicts, Converter={StaticResource BoolToVisibility}}"/>
-                        <ItemsControl ItemsSource="{Binding ShadowConflicts}"
-                                      Visibility="{Binding HasShadowConflicts, Converter={StaticResource BoolToVisibility}}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Border Background="#1E1E2E" CornerRadius="3" Padding="8,5" Margin="0,0,0,3"
-                                            Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=DataGrid}}">
-                                        <Border.ContextMenu>
-                                            <ContextMenu>
-                                                <MenuItem Header="Open shadowing folder in Explorer"
-                                                          Command="{Binding PlacementTarget.Tag.OpenShadowFolderCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                                          CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-                                                <MenuItem Header="Copy exe name"
-                                                          Command="{Binding PlacementTarget.Tag.CopyExeNameCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                                          CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-                                                <MenuItem Header="Copy winning folder path"
-                                                          Command="{Binding PlacementTarget.Tag.CopyShadowedFolderPathCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                                          CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-                                                <Separator/>
-                                                <MenuItem Header="{Binding PlacementTarget.DataContext.ExeName, RelativeSource={RelativeSource AncestorType=ContextMenu}, StringFormat='Search: multiple {0} versions'}"
-                                                          Command="{Binding PlacementTarget.Tag.SearchMultipleVersionsCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                                          CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-                                            </ContextMenu>
-                                        </Border.ContextMenu>
-                                        <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="{Binding ExeName, Mode=OneWay}" Foreground="#FAB387"
-                                                       FontWeight="SemiBold" FontSize="12" Width="120"/>
-                                            <TextBlock Foreground="#6C7086" FontSize="12" Text="wins from:" Margin="0,0,6,0"/>
-                                            <TextBlock Text="{Binding ShadowedFolderPath, Mode=OneWay}" Foreground="#CDD6F4" FontSize="12"/>
-                                        </StackPanel>
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
                     </StackPanel>
                 </DataTemplate>
             </DataGrid.RowDetailsTemplate>
@@ -174,24 +133,15 @@
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
-                <DataGridTemplateColumn Header="Conflicts" Width="90">
+                <DataGridTemplateColumn Header="Conflict" Width="70">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
-                            <Grid>
-                                <ToggleButton IsChecked="{Binding IsExpanded}"
-                                              Visibility="{Binding HasShadowConflicts, Converter={StaticResource BoolToVisibility}}"
-                                              Background="Transparent" BorderThickness="0" Cursor="Hand"
-                                              HorizontalAlignment="Left" Padding="2"
-                                              PreviewMouseLeftButtonDown="ConflictToggle_PreviewMouseLeftButtonDown">
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="&#9656;" Foreground="#FAB387" FontSize="11" Margin="0,0,4,0"/>
-                                        <TextBlock Foreground="#FAB387" FontSize="12" FontWeight="SemiBold">
-                                            <Run Text="{Binding ShadowConflicts.Count, Mode=OneWay}"/>
-                                            <Run Text=" shadowed"/>
-                                        </TextBlock>
-                                    </StackPanel>
-                                </ToggleButton>
-                                <TextBlock Text="—" Foreground="#45475A" FontSize="12"
+                            <Grid HorizontalAlignment="Center">
+                                <Border Width="10" Height="10" CornerRadius="5"
+                                        ToolTip="Shadow conflict — see the Conflicts tab"
+                                        Visibility="{Binding HasShadowConflicts, Converter={StaticResource BoolToVisibility}}"
+                                        Background="{Binding ShadowConfidence, Converter={StaticResource ConflictConfidence}, ConverterParameter=brush}"/>
+                                <TextBlock Text="—" Foreground="#45475A" FontSize="12" HorizontalAlignment="Center"
                                            Visibility="{Binding HasShadowConflicts, Converter={StaticResource InverseBoolToVisibility}}"/>
                             </Grid>
                         </DataTemplate>

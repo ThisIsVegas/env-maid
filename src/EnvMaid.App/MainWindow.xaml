@@ -2,10 +2,55 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:views="clr-namespace:EnvMaid.App.Views"
+        xmlns:conv="clr-namespace:EnvMaid.App.Converters"
         Title="EnvMaid" Height="820" Width="1150" WindowStartupLocation="CenterScreen"
         Background="#1E1E2E" FontFamily="Segoe UI">
 
     <Window.Resources>
+        <conv:CountToBrushConverter x:Key="CountToBrush"/>
+        <conv:EnumToBoolConverter x:Key="EnumToBool"/>
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+
+        <!-- Summary strip tile -->
+        <Style x:Key="StatTile" TargetType="Border">
+            <Setter Property="Background" Value="#313244"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Padding" Value="14,10"/>
+            <Setter Property="Margin" Value="0,0,10,0"/>
+            <Setter Property="MinWidth" Value="120"/>
+        </Style>
+        <Style x:Key="TileLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#A6ADC8"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Margin" Value="0,0,0,2"/>
+        </Style>
+        <Style x:Key="TileValue" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#CDD6F4"/>
+            <Setter Property="FontSize" Value="22"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+        </Style>
+
+        <!-- Scope toggle segment (radio styled as button) -->
+        <Style x:Key="ScopeSegment" TargetType="RadioButton">
+            <Setter Property="Foreground" Value="#A6ADC8"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border Name="Seg" Background="#313244" Padding="12,6" Margin="0">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Seg" Property="Background" Value="#89B4FA"/>
+                                <Setter Property="Foreground" Value="#1E1E2E"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style x:Key="ToolbarButton" TargetType="Button">
             <Setter Property="Background" Value="#313244"/>
             <Setter Property="Foreground" Value="#CDD6F4"/>
@@ -92,12 +137,75 @@
             <Button Content="Restore Backup..." Style="{StaticResource ToolbarButton}" Click="RestoreBackup_Click"/>
         </StackPanel>
 
-        <TabControl>
+        <!-- Summary strip -->
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,14" DataContext="{Binding Dashboard}">
+            <!-- Scope toggle -->
+            <Border DockPanel.Dock="Right" CornerRadius="6" ClipToBounds="True" VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal">
+                    <RadioButton Content="Combined" GroupName="Scope" Style="{StaticResource ScopeSegment}"
+                                 IsChecked="{Binding Scope, Converter={StaticResource EnumToBool}, ConverterParameter=Combined}"/>
+                    <RadioButton Content="User" GroupName="Scope" Style="{StaticResource ScopeSegment}"
+                                 IsChecked="{Binding Scope, Converter={StaticResource EnumToBool}, ConverterParameter=User}"/>
+                    <RadioButton Content="System" GroupName="Scope" Style="{StaticResource ScopeSegment}"
+                                 IsChecked="{Binding Scope, Converter={StaticResource EnumToBool}, ConverterParameter=System}"/>
+                </StackPanel>
+            </Border>
+
+            <StackPanel Orientation="Horizontal">
+                <Border Style="{StaticResource StatTile}">
+                    <StackPanel>
+                        <TextBlock Text="Broken" Style="{StaticResource TileLabel}"/>
+                        <TextBlock Text="{Binding BrokenCount}" Style="{StaticResource TileValue}"
+                                   Foreground="{Binding BrokenCount, Converter={StaticResource CountToBrush}, ConverterParameter=red}"/>
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource StatTile}">
+                    <StackPanel>
+                        <TextBlock Text="Duplicates" Style="{StaticResource TileLabel}"/>
+                        <TextBlock Text="{Binding DuplicateCount}" Style="{StaticResource TileValue}"
+                                   Foreground="{Binding DuplicateCount, Converter={StaticResource CountToBrush}, ConverterParameter=red}"/>
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource StatTile}" Cursor="Hand"
+                        MouseLeftButtonUp="ConflictsTile_Click">
+                    <StackPanel>
+                        <TextBlock Text="Conflicts" Style="{StaticResource TileLabel}"/>
+                        <TextBlock Text="{Binding ConflictCount}" Style="{StaticResource TileValue}"
+                                   Foreground="{Binding ConflictCount, Converter={StaticResource CountToBrush}, ConverterParameter=amber}"/>
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource StatTile}" MinWidth="150"
+                        Visibility="{Binding ShowLength, Converter={StaticResource BoolToVis}}">
+                    <StackPanel>
+                        <TextBlock Text="PATH length" Style="{StaticResource TileLabel}"/>
+                        <TextBlock Text="{Binding LengthLabel}" FontSize="16" FontWeight="Bold">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="#CDD6F4"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding LengthOverLimit}" Value="True">
+                                            <Setter Property="Foreground" Value="#F38BA8"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </DockPanel>
+
+        <TabControl x:Name="MainTabs">
             <TabItem Header="User PATH">
-                <views:PathPanel DataContext="{Binding UserPaths}"/>
+                <views:PathPanel x:Name="UserPanel" DataContext="{Binding UserPaths}"
+                                 ConflictActivated="PathPanel_ConflictActivated"/>
             </TabItem>
             <TabItem Header="System PATH 🛡 (admin required)">
-                <views:PathPanel DataContext="{Binding SystemPaths}"/>
+                <views:PathPanel x:Name="SystemPanel" DataContext="{Binding SystemPaths}"
+                                 ConflictActivated="PathPanel_ConflictActivated"/>
+            </TabItem>
+            <TabItem Header="Conflicts">
+                <views:ConflictsView DataContext="{Binding Conflicts}"/>
             </TabItem>
         </TabControl>
     </DockPanel>

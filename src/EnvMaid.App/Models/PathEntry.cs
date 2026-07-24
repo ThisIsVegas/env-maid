@@ -15,10 +15,10 @@ public partial class PathEntry : ObservableObject
     private FlagConfidence _confidence = FlagConfidence.None;
 
     [ObservableProperty]
-    private bool _isChecked;
+    private PathFlag _flags = PathFlag.None;
 
     [ObservableProperty]
-    private bool _isExpanded;
+    private bool _isChecked;
 
     [ObservableProperty]
     private int _globalRank;
@@ -33,12 +33,21 @@ public partial class PathEntry : ObservableObject
 
     public bool HasShadowConflicts => ShadowConflicts.Count > 0;
 
+    /// <summary>Worst (most-real) confidence among this entry's shadow conflicts,
+    /// used to color the grid's conflict marker. Null when there are none.</summary>
+    public ConflictConfidence? ShadowConfidence =>
+        ShadowConflicts.Count == 0 ? null : ShadowConflicts.Max(c => c.Confidence);
+
     public PathScope Scope { get; }
 
     public PathEntry(string path, PathScope scope)
     {
         _path = path;
         Scope = scope;
-        ShadowConflicts.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasShadowConflicts));
+        ShadowConflicts.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(HasShadowConflicts));
+            OnPropertyChanged(nameof(ShadowConfidence));
+        };
     }
 }

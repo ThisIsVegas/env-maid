@@ -144,35 +144,6 @@ public partial class PathListViewModel : ObservableObject
         TryCopyToClipboard(entry.Path);
     }
 
-    [RelayCommand]
-    private void OpenShadowFolder(ShadowConflict? conflict)
-    {
-        if (conflict is null || !Directory.Exists(conflict.ShadowedFolderPath)) return;
-        Process.Start(new ProcessStartInfo { FileName = conflict.ShadowedFolderPath, UseShellExecute = true });
-    }
-
-    [RelayCommand]
-    private void CopyExeName(ShadowConflict? conflict)
-    {
-        if (conflict is null) return;
-        TryCopyToClipboard(conflict.ExeName);
-    }
-
-    [RelayCommand]
-    private void CopyShadowedFolderPath(ShadowConflict? conflict)
-    {
-        if (conflict is null) return;
-        TryCopyToClipboard(conflict.ShadowedFolderPath);
-    }
-
-    [RelayCommand]
-    private void SearchMultipleVersions(ShadowConflict? conflict)
-    {
-        if (conflict is null) return;
-        var url = SearchUrlBuilder.BuildMultipleVersionsQuery(conflict.ExeName);
-        Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });
-    }
-
     private static void TryCopyToClipboard(string text)
     {
         try
