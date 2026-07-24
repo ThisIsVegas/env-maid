@@ -23,7 +23,8 @@ public partial class App : Application
         var orphanService = new OrphanDetectionService(ranker);
         var conflictAnalysisService = new ConflictAnalysisService(ranker);
         var backupService = new BackupService();
-        var mainViewModel = new MainViewModel(envService, orphanService, conflictAnalysisService, backupService);
+        var diffService = new PathDiffService();
+        var mainViewModel = new MainViewModel(envService, orphanService, conflictAnalysisService, backupService, diffService);
 
         var window = new MainWindow(mainViewModel);
         window.Show();

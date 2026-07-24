@@ -11,6 +11,11 @@ public partial class MainViewModel : ObservableObject
     private readonly EnvironmentPathService _envService;
     private readonly OrphanDetectionService _orphanService;
     private readonly BackupService _backupService;
+    private readonly PathDiffService _diffService;
+
+    /// <summary>Shows the save-diff confirm gate. Returns true to proceed with the
+    /// write. Set by the view; if null, the save proceeds without confirmation.</summary>
+    public Func<IReadOnlyList<ScopeDiff>, bool>? ConfirmSave { get; set; }
 
     public PathListViewModel UserPaths { get; }
     public PathListViewModel SystemPaths { get; }
@@ -24,11 +29,13 @@ public partial class MainViewModel : ObservableObject
         EnvironmentPathService envService,
         OrphanDetectionService orphanService,
         ConflictAnalysisService conflictAnalysisService,
-        BackupService backupService)
+        BackupService backupService,
+        PathDiffService diffService)
     {
         _envService = envService;
         _orphanService = orphanService;
         _backupService = backupService;
+        _diffService = diffService;
 
         UserPaths = new PathListViewModel(PathScope.User);
         SystemPaths = new PathListViewModel(PathScope.System);
@@ -87,6 +94,27 @@ public partial class MainViewModel : ObservableObject
     {
         var currentUser = _envService.GetEntries(PathScope.User);
         var currentSystem = _envService.GetEntries(PathScope.System);
+
+        var stagedUser = UserPaths.Entries.Select(e => e.Path).ToList();
+        var stagedSystem = SystemPaths.Entries.Select(e => e.Path).ToList();
+        var diffs = new[]
+        {
+            _diffService.Diff(PathScope.User, currentUser, stagedUser),
+            _diffService.Diff(PathScope.System, currentSystem, stagedSystem),
+        };
+
+        if (diffs.All(d => !d.HasChanges))
+        {
+            StatusMessage = "No changes to save.";
+            return;
+        }
+
+        if (ConfirmSave is not null && !ConfirmSave(diffs))
+        {
+            StatusMessage = "Save cancelled.";
+            return;
+        }
+
         var backupFile = _backupService.CreateBackup(currentUser, currentSystem);
 
         _envService.SetEntries(PathScope.User, UserPaths.Entries.Select(e => e.Path));

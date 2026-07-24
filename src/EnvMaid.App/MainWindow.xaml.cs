@@ -13,6 +13,11 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         _viewModel = viewModel;
+        _viewModel.ConfirmSave = diffs =>
+        {
+            var dialog = new SaveDiffDialog(diffs) { Owner = this };
+            return dialog.ShowDialog() == true;
+        };
         DataContext = _viewModel;
     }
 
