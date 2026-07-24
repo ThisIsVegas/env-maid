@@ -8,8 +8,8 @@ public class OrphanDetectionServiceTests
 {
     // Point the CLI-tool list at a nonexistent user file so tests depend only on
     // the built-in allowlist, not on whatever is in the real %APPDATA%.
-    private readonly OrphanDetectionService _sut = new(
-        new CliToolListService(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".txt")));
+    private readonly OrphanDetectionService _sut = new(new ConflictRanker(
+        new CliToolListService(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".txt"))));
 
     [Fact]
     public void ApplyFlags_EmptyPath_FlagsHighConfidence()

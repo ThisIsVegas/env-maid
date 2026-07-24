@@ -19,7 +19,9 @@ public partial class App : Application
 
         var envService = new EnvironmentPathService();
         var cliToolListService = new CliToolListService();
-        var orphanService = new OrphanDetectionService(cliToolListService);
+        var ranker = new ConflictRanker(cliToolListService);
+        var orphanService = new OrphanDetectionService(ranker);
+        var conflictAnalysisService = new ConflictAnalysisService(ranker);
         var backupService = new BackupService();
         var mainViewModel = new MainViewModel(envService, orphanService, backupService);
 
