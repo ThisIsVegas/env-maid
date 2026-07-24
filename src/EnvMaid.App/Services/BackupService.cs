@@ -28,6 +28,22 @@ public class BackupService
         return file;
     }
 
+    /// <summary>Write the current PATH to a user-chosen file (Export). Same JSON shape as a
+    /// backup, so an exported profile can be re-imported or restored interchangeably. %VAR%
+    /// entries are written verbatim, keeping the profile portable across machines.</summary>
+    public void ExportTo(string filePath, IEnumerable<string> userEntries, IEnumerable<string> systemEntries)
+    {
+        var backup = new PathBackup(
+            DateTime.Now.ToString("yyyyMMdd-HHmmss"),
+            string.Join(';', userEntries),
+            string.Join(';', systemEntries));
+        File.WriteAllText(filePath, JsonSerializer.Serialize(backup, new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    /// <summary>Read a PATH profile from a user-chosen file (Import). Same parser as a
+    /// backup restore.</summary>
+    public PathBackup ImportFrom(string filePath) => LoadBackup(filePath);
+
     public IReadOnlyList<FileInfo> ListBackups() =>
         new DirectoryInfo(_backupDir)
             .GetFiles("backup-*.json")

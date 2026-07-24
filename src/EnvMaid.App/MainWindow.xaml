@@ -135,6 +135,10 @@
             <Button Content="Remove Checked" Style="{StaticResource DangerButton}" Command="{Binding RemoveAllCheckedCommand}"/>
             <Button Content="Save All Changes" Style="{StaticResource AccentButton}" Command="{Binding SaveCommand}"/>
             <Button Content="Restore Backup..." Style="{StaticResource ToolbarButton}" Click="RestoreBackup_Click"/>
+            <Button Content="Export..." Style="{StaticResource ToolbarButton}" Command="{Binding ExportCommand}"
+                    ToolTip="Save the current PATH (both scopes) to a portable profile file"/>
+            <Button Content="Import..." Style="{StaticResource ToolbarButton}" Command="{Binding ImportCommand}"
+                    ToolTip="Load a PATH profile from a file; review in the Save dialog before it applies"/>
         </StackPanel>
 
         <!-- Summary strip -->

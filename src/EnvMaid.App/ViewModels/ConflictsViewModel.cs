@@ -38,6 +38,11 @@ public partial class ConflictsViewModel : ObservableObject
 
     public int ConflictCount => Groups.Count;
 
+    /// <summary>Conflict groups touching <paramref name="scope"/> — i.e. whose winner
+    /// or any loser folder lives in that scope. A cross-scope group counts for both.</summary>
+    public int ConflictCountForScope(PathScope scope) =>
+        Groups.Count(g => g.Winner.Scope == scope || g.Losers.Any(l => l.Scope == scope));
+
     public ConflictsViewModel(
         ConflictAnalysisService analysis,
         PathListViewModel userPaths,

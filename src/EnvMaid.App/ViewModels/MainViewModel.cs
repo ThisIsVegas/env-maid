@@ -18,6 +18,14 @@ public partial class MainViewModel : ObservableObject
     /// write. Set by the view; if null, the save proceeds without confirmation.</summary>
     public Func<IReadOnlyList<ScopeDiff>, bool>? ConfirmSave { get; set; }
 
+    /// <summary>Prompts for a file path to export the current PATH to (Save dialog).
+    /// Returns null if cancelled. Set by the view.</summary>
+    public Func<string?>? PickExportFile { get; set; }
+
+    /// <summary>Prompts for a PATH profile file to import (Open dialog). Returns null if
+    /// cancelled. Set by the view.</summary>
+    public Func<string?>? PickImportFile { get; set; }
+
     public PathListViewModel UserPaths { get; }
     public PathListViewModel SystemPaths { get; }
     public ConflictsViewModel Conflicts { get; }
@@ -196,6 +204,54 @@ public partial class MainViewModel : ObservableObject
         return _envService.TryElevateSetSystemPath(joined)
             ? SystemPathApplyResult.Applied
             : SystemPathApplyResult.Failed;
+    }
+
+    /// <summary>Write the current staged PATH (both scopes) to a user-chosen file.</summary>
+    [RelayCommand]
+    private void Export()
+    {
+        var target = PickExportFile?.Invoke();
+        if (string.IsNullOrEmpty(target))
+            return;
+
+        _backupService.ExportTo(
+            target,
+            UserPaths.Entries.Select(e => e.Path),
+            SystemPaths.Entries.Select(e => e.Path));
+        StatusMessage = $"Exported to {Path.GetFileName(target)}.";
+    }
+
+    /// <summary>Load a PATH profile from a file, replacing the staged entries. Nothing is
+    /// written to the environment yet — the user reviews the change through the Save gate.</summary>
+    [RelayCommand]
+    private void Import()
+    {
+        var source = PickImportFile?.Invoke();
+        if (string.IsNullOrEmpty(source))
+            return;
+
+        PathBackup profile;
+        try
+        {
+            profile = _backupService.ImportFrom(source);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or System.Text.Json.JsonException)
+        {
+            StatusMessage = "Import failed: file could not be read as a PATH profile.";
+            return;
+        }
+
+        UserPaths.LoadEntries(profile.UserPath.Length > 0 ? profile.UserPath.Split(';') : Array.Empty<string>());
+        SystemPaths.LoadEntries(profile.SystemPath.Length > 0 ? profile.SystemPath.Split(';') : Array.Empty<string>());
+
+        _orphanService.ApplyFlags(UserPaths.Entries.ToList(), SystemPaths.Entries.ToList());
+        UserPaths.RecalculateLength();
+        SystemPaths.RecalculateLength();
+        RecalculateGlobalRank();
+        Conflicts.Refresh();
+        Dashboard.Refresh();
+
+        StatusMessage = $"Imported {Path.GetFileName(source)}. Review and click Save to apply.";
     }
 
     public IReadOnlyList<string> GetBackupNames() =>

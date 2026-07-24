@@ -3,12 +3,20 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using EnvMaid.App.Models;
+using Microsoft.Win32;
 
 namespace EnvMaid.App.Services;
 
 public class EnvironmentPathService
 {
     public const string ElevatedSetSystemPathArg = "--elevated-set-system-path";
+
+    // Registry locations backing the User and System PATH. We read/write here rather
+    // than via Environment.GetEnvironmentVariable so that entries like "%JAVA_HOME%\bin"
+    // survive a round-trip: the Environment API expands %VARS% on read, which would make
+    // Save rewrite them into hardcoded literals and destroy the variable reference.
+    private const string UserEnvKey = @"Environment";
+    private const string SystemEnvKey = @"SYSTEM\CurrentControlSet\Control\Session Manager\Environment";
 
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
     private static extern IntPtr SendMessageTimeout(
@@ -58,8 +66,9 @@ public class EnvironmentPathService
 
     public IReadOnlyList<string> GetEntries(PathScope scope)
     {
-        var target = ToEnvironmentVariableTarget(scope);
-        var raw = Environment.GetEnvironmentVariable("Path", target);
+        using var key = OpenEnvKey(scope, writable: false);
+        // DoNotExpandEnvironmentNames keeps "%VAR%\bin" literal instead of expanding it.
+        var raw = key?.GetValue("Path", null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string;
         if (string.IsNullOrEmpty(raw))
             return Array.Empty<string>();
 
@@ -68,10 +77,18 @@ public class EnvironmentPathService
 
     public void SetEntries(PathScope scope, IEnumerable<string> entries)
     {
-        var target = ToEnvironmentVariableTarget(scope);
         var joined = string.Join(';', entries);
-        Environment.SetEnvironmentVariable("Path", joined, target);
+        using var key = OpenEnvKey(scope, writable: true)
+            ?? throw new InvalidOperationException($"Could not open the {scope} environment registry key for writing.");
+        // ExpandString (REG_EXPAND_SZ) is the type Windows expects for PATH, so any
+        // %VAR% references we preserved on read stay expandable at use time.
+        key.SetValue("Path", joined, RegistryValueKind.ExpandString);
     }
+
+    private static RegistryKey? OpenEnvKey(PathScope scope, bool writable) =>
+        scope == PathScope.User
+            ? Registry.CurrentUser.OpenSubKey(UserEnvKey, writable)
+            : Registry.LocalMachine.OpenSubKey(SystemEnvKey, writable);
 
     public void BroadcastEnvironmentChange()
     {
@@ -79,7 +96,4 @@ public class EnvironmentPathService
         SendMessageTimeout(hwndBroadcast, WM_SETTINGCHANGE, UIntPtr.Zero, "Environment",
             SMTO_ABORTIFHUNG, 5000, out _);
     }
-
-    private static EnvironmentVariableTarget ToEnvironmentVariableTarget(PathScope scope) =>
-        scope == PathScope.User ? EnvironmentVariableTarget.User : EnvironmentVariableTarget.Machine;
 }
