@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [develop, master]
+  pull_request:
+    branches: [develop, master]
+
+jobs:
+  build-test:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          cache: true
+
+      - name: Restore
+        run: dotnet restore EnvMaid.slnx
+
+      - name: Build
+        run: dotnet build EnvMaid.slnx --no-restore --configuration Release
+
+      - name: Test
+        run: dotnet test src/EnvMaid.App.Tests/EnvMaid.App.Tests.csproj --no-build --configuration Release
