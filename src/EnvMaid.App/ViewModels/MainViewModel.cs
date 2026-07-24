@@ -14,11 +14,16 @@ public partial class MainViewModel : ObservableObject
 
     public PathListViewModel UserPaths { get; }
     public PathListViewModel SystemPaths { get; }
+    public ConflictsViewModel Conflicts { get; }
 
     [ObservableProperty]
     private string _statusMessage = string.Empty;
 
-    public MainViewModel(EnvironmentPathService envService, OrphanDetectionService orphanService, BackupService backupService)
+    public MainViewModel(
+        EnvironmentPathService envService,
+        OrphanDetectionService orphanService,
+        ConflictAnalysisService conflictAnalysisService,
+        BackupService backupService)
     {
         _envService = envService;
         _orphanService = orphanService;
@@ -26,11 +31,18 @@ public partial class MainViewModel : ObservableObject
 
         UserPaths = new PathListViewModel(PathScope.User);
         SystemPaths = new PathListViewModel(PathScope.System);
+        Conflicts = new ConflictsViewModel(conflictAnalysisService, UserPaths, SystemPaths);
 
-        UserPaths.Entries.CollectionChanged += (_, _) => RecalculateGlobalRank();
-        SystemPaths.Entries.CollectionChanged += (_, _) => RecalculateGlobalRank();
+        UserPaths.Entries.CollectionChanged += (_, _) => OnEntriesChanged();
+        SystemPaths.Entries.CollectionChanged += (_, _) => OnEntriesChanged();
 
         Rescan();
+    }
+
+    private void OnEntriesChanged()
+    {
+        RecalculateGlobalRank();
+        Conflicts.Refresh();
     }
 
     [RelayCommand]
@@ -43,6 +55,7 @@ public partial class MainViewModel : ObservableObject
         UserPaths.RecalculateLength();
         SystemPaths.RecalculateLength();
         RecalculateGlobalRank();
+        Conflicts.Refresh();
 
         StatusMessage = "Scan complete.";
     }
