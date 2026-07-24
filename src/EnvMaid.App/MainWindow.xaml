@@ -8,6 +8,7 @@
         Height="820"
         MinWidth="920"
         MinHeight="650"
+        Icon="Assets/app_icon.ico"
         WindowStartupLocation="CenterScreen"
         Style="{StaticResource AppWindow}">
     <Window.Resources>
@@ -29,11 +30,11 @@
             </Grid.ColumnDefinitions>
 
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                <Border Width="30" Height="30" CornerRadius="6" Background="{StaticResource AccentBrush}" Margin="0,0,10,0">
-                    <TextBlock Text="E" Foreground="{StaticResource AccentForegroundBrush}"
-                               FontWeight="Bold" FontSize="15"
-                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                </Border>
+                <Image Source="Assets/app_icon.ico"
+                       Width="30"
+                       Height="30"
+                       Stretch="Uniform"
+                       Margin="0,0,10,0"/>
                 <StackPanel>
                     <TextBlock Text="EnvMaid" FontFamily="Segoe UI Variable Display"
                                FontSize="17" FontWeight="SemiBold"/>

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/app_icon.png" alt="EnvMaid application icon" width="180">
+</p>
+
 # EnvMaid
 
 Windows PATH environment variable cleanup tool. Scans User and System PATH entries, flags orphaned/duplicate/empty entries, lets you review and remove them, with automatic backup before any change.
