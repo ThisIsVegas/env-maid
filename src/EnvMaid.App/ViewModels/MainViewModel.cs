@@ -13,6 +13,9 @@ public partial class MainViewModel : ObservableObject
     private readonly BackupService _backupService;
     private readonly PathDiffService _diffService;
     private readonly CliToolListService _cliTools;
+    private IReadOnlyList<string> _baselineUser = Array.Empty<string>();
+    private IReadOnlyList<string> _baselineSystem = Array.Empty<string>();
+    private bool _isRefreshing;
 
     /// <summary>Shows the save-diff confirm gate. Returns true to proceed with the
     /// write. Set by the view; if null, the save proceeds without confirmation.</summary>
@@ -34,6 +37,12 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty]
     private string _statusMessage = string.Empty;
 
+    [ObservableProperty]
+    private string _lastScannedLabel = string.Empty;
+
+    [ObservableProperty]
+    private bool _hasStagedChanges;
+
     public MainViewModel(
         EnvironmentPathService envService,
         OrphanDetectionService orphanService,
@@ -53,33 +62,62 @@ public partial class MainViewModel : ObservableObject
         Conflicts = new ConflictsViewModel(conflictAnalysisService, UserPaths, SystemPaths);
         Dashboard = new DashboardViewModel(UserPaths, SystemPaths, Conflicts);
 
-        UserPaths.Entries.CollectionChanged += (_, _) => OnEntriesChanged();
-        SystemPaths.Entries.CollectionChanged += (_, _) => OnEntriesChanged();
+        UserPaths.EntriesChanged += (_, _) => OnEntriesChanged();
+        SystemPaths.EntriesChanged += (_, _) => OnEntriesChanged();
 
         Rescan();
     }
 
     private void OnEntriesChanged()
     {
-        RecalculateGlobalRank();
-        Conflicts.Refresh();
-        Dashboard.Refresh();
+        if (_isRefreshing)
+            return;
+
+        RefreshAnalysis();
+        RefreshStagedState();
     }
 
     [RelayCommand]
     private void Rescan()
     {
-        UserPaths.LoadEntries(_envService.GetEntries(PathScope.User));
-        SystemPaths.LoadEntries(_envService.GetEntries(PathScope.System));
+        _isRefreshing = true;
+        try
+        {
+            _baselineUser = _envService.GetEntries(PathScope.User).ToList();
+            _baselineSystem = _envService.GetEntries(PathScope.System).ToList();
+            UserPaths.LoadEntries(_baselineUser);
+            SystemPaths.LoadEntries(_baselineSystem);
 
+            RefreshAnalysis();
+        }
+        finally
+        {
+            _isRefreshing = false;
+        }
+
+        HasStagedChanges = false;
+        LastScannedLabel = $"Last scanned {DateTime.Now:h:mm tt}";
+        StatusMessage = string.Empty;
+    }
+
+    private void RefreshAnalysis()
+    {
         _orphanService.ApplyFlags(UserPaths.Entries.ToList(), SystemPaths.Entries.ToList());
         UserPaths.RecalculateLength();
         SystemPaths.RecalculateLength();
         RecalculateGlobalRank();
         Conflicts.Refresh();
         Dashboard.Refresh();
+    }
 
-        StatusMessage = "Scan complete.";
+    private void RefreshStagedState()
+    {
+        // This is stored-state equality, not folder identity: normalization and
+        // compression intentionally change the saved representation even when the
+        // resulting folder is equivalent.
+        HasStagedChanges =
+            !_baselineUser.SequenceEqual(UserPaths.Entries.Select(entry => entry.Path), StringComparer.OrdinalIgnoreCase) ||
+            !_baselineSystem.SequenceEqual(SystemPaths.Entries.Select(entry => entry.Path), StringComparer.OrdinalIgnoreCase);
     }
 
     private void RecalculateGlobalRank()
@@ -148,13 +186,14 @@ public partial class MainViewModel : ObservableObject
 
         _envService.BroadcastEnvironmentChange();
 
-        StatusMessage = systemResult switch
+        var savedMessage = systemResult switch
         {
             SystemPathApplyResult.NotChanged => $"Saved. Backup: {Path.GetFileName(backupFile)}",
             SystemPathApplyResult.Applied => $"Saved (including System PATH). Backup: {Path.GetFileName(backupFile)}",
             _ => $"User PATH saved. System PATH not applied (elevation cancelled or failed). Backup: {Path.GetFileName(backupFile)}",
         };
         Rescan();
+        StatusMessage = savedMessage;
     }
 
     [RelayCommand]
@@ -241,16 +280,20 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        UserPaths.LoadEntries(profile.UserPath.Length > 0 ? profile.UserPath.Split(';') : Array.Empty<string>());
-        SystemPaths.LoadEntries(profile.SystemPath.Length > 0 ? profile.SystemPath.Split(';') : Array.Empty<string>());
+        _isRefreshing = true;
+        try
+        {
+            UserPaths.LoadEntries(profile.UserPath.Length > 0 ? profile.UserPath.Split(';') : Array.Empty<string>());
+            SystemPaths.LoadEntries(profile.SystemPath.Length > 0 ? profile.SystemPath.Split(';') : Array.Empty<string>());
 
-        _orphanService.ApplyFlags(UserPaths.Entries.ToList(), SystemPaths.Entries.ToList());
-        UserPaths.RecalculateLength();
-        SystemPaths.RecalculateLength();
-        RecalculateGlobalRank();
-        Conflicts.Refresh();
-        Dashboard.Refresh();
+            RefreshAnalysis();
+        }
+        finally
+        {
+            _isRefreshing = false;
+        }
 
+        RefreshStagedState();
         StatusMessage = $"Imported {Path.GetFileName(source)}. Review and click Save to apply.";
     }
 

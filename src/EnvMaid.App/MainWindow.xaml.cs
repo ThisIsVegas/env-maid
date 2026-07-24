@@ -1,5 +1,7 @@
 using System.Windows;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using EnvMaid.App.Models;
 using EnvMaid.App.ViewModels;
 using EnvMaid.App.Views;
 
@@ -18,6 +20,8 @@ public partial class MainWindow : Window
             var dialog = new SaveDiffDialog(diffs) { Owner = this };
             return dialog.ShowDialog() == true;
         };
+        _viewModel.UserPaths.ConfirmMaintenance = ShowMaintenancePreview;
+        _viewModel.SystemPaths.ConfirmMaintenance = ShowMaintenancePreview;
         _viewModel.PickExportFile = () =>
         {
             var dialog = new Microsoft.Win32.SaveFileDialog
@@ -42,15 +46,78 @@ public partial class MainWindow : Window
         DataContext = _viewModel;
     }
 
-    private void ConflictsTile_Click(object sender, MouseButtonEventArgs e)
+    private bool ShowMaintenancePreview(MaintenancePreview preview)
     {
-        MainTabs.SelectedIndex = 2; // Conflicts tab
+        var dialog = new MaintenancePreviewDialog(preview) { Owner = this };
+        return dialog.ShowDialog() == true;
     }
 
     private void PathPanel_ConflictActivated(object? sender, EventArgs e)
     {
-        MainTabs.SelectedIndex = 2; // Conflicts tab
+        OpenEditor(2);
     }
+
+    private void MoreButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (MoreButton.ContextMenu is null)
+            return;
+
+        MoreButton.ContextMenu.PlacementTarget = MoreButton;
+        MoreButton.ContextMenu.Placement = PlacementMode.Bottom;
+        MoreButton.ContextMenu.IsOpen = true;
+    }
+
+    private void ReviewItems_Click(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel.Dashboard.BrokenCount > 0)
+            ReviewBroken_Click(sender, e);
+        else if (_viewModel.Dashboard.DuplicateCount > 0)
+            ReviewDuplicates_Click(sender, e);
+        else
+            ReviewConflicts_Click(sender, e);
+    }
+
+    private void ReviewBroken_Click(object sender, RoutedEventArgs e)
+    {
+        ReviewFirst(IsBroken);
+    }
+
+    private void ReviewDuplicates_Click(object sender, RoutedEventArgs e)
+    {
+        ReviewFirst(entry => entry.Flags.HasFlag(PathFlag.Duplicate));
+    }
+
+    private void ReviewFirst(Func<PathEntry, bool> predicate)
+    {
+        var entry = _viewModel.UserPaths.Entries.FirstOrDefault(predicate);
+        if (entry is not null)
+        {
+            _viewModel.UserPaths.SelectedEntry = entry;
+            OpenEditor(0);
+            return;
+        }
+
+        entry = _viewModel.SystemPaths.Entries.FirstOrDefault(predicate);
+        if (entry is not null)
+        {
+            _viewModel.SystemPaths.SelectedEntry = entry;
+            OpenEditor(1);
+        }
+    }
+
+    private void ReviewConflicts_Click(object sender, RoutedEventArgs e)
+    {
+        OpenEditor(2);
+    }
+
+    private void OpenEditor(int tabIndex)
+    {
+        MainTabs.SelectedIndex = 1;
+        EditorTabs.SelectedIndex = tabIndex;
+    }
+
+    private static bool IsBroken(PathEntry entry) =>
+        entry.Flags.HasFlag(PathFlag.Missing) || entry.Flags.HasFlag(PathFlag.Empty);
 
     private void RestoreBackup_Click(object sender, RoutedEventArgs e)
     {

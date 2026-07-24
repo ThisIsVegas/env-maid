@@ -1,4 +1,5 @@
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using EnvMaid.App.Models;
 
 namespace EnvMaid.App.Views;
@@ -12,6 +13,16 @@ public partial class PathPanel : UserControl
     public PathPanel()
     {
         InitializeComponent();
+    }
+
+    private void ToolsButton_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (ToolsButton.ContextMenu is null)
+            return;
+
+        ToolsButton.ContextMenu.PlacementTarget = ToolsButton;
+        ToolsButton.ContextMenu.Placement = PlacementMode.Bottom;
+        ToolsButton.ContextMenu.IsOpen = true;
     }
 
     private void Row_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)

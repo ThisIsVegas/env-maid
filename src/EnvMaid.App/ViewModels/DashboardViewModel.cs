@@ -6,9 +6,8 @@ namespace EnvMaid.App.ViewModels;
 public enum DashboardScope { Combined, User, System }
 
 /// <summary>
-/// The always-visible summary strip: worst-severity health label plus counts of
-/// broken/duplicate entries, conflicts, and PATH length, filtered by a scope toggle.
-/// Recomputes from the current (staged) entries on demand.
+/// Plain-language health summary plus issue counts for the overview.
+/// Recomputes from the current staged entries on demand.
 /// </summary>
 public partial class DashboardViewModel : ObservableObject
 {
@@ -27,6 +26,30 @@ public partial class DashboardViewModel : ObservableObject
     [ObservableProperty] private int _totalLength;
     [ObservableProperty] private string _lengthLabel = "0 / 2047";
     [ObservableProperty] private bool _lengthOverLimit;
+
+    public int AttentionCount => BrokenCount + DuplicateCount + ConflictCount;
+    public bool HasAttention => AttentionCount > 0;
+    public int EntryCount => _userPaths.Entries.Count + _systemPaths.Entries.Count;
+    public string HealthTitle => HasAttention
+        ? $"{AttentionCount} {(AttentionCount == 1 ? "finding needs" : "findings need")} attention"
+        : "Your PATH looks good";
+    public string HealthSummary
+    {
+        get
+        {
+            if (!HasAttention)
+                return $"{EntryCount} locations checked. No action is needed.";
+
+            var parts = new List<string>();
+            if (BrokenCount > 0)
+                parts.Add($"{BrokenCount} missing or empty {(BrokenCount == 1 ? "location" : "locations")}");
+            if (DuplicateCount > 0)
+                parts.Add($"{DuplicateCount} duplicate {(DuplicateCount == 1 ? "entry" : "entries")}");
+            if (ConflictCount > 0)
+                parts.Add($"{ConflictCount} command-priority {(ConflictCount == 1 ? "concern" : "concerns")}");
+            return SentenceList(parts) + ".";
+        }
+    }
 
     // Length for the combined scope is meaningless (User and System are separate
     // variables), so the tile is hidden unless a single scope is selected.
@@ -62,7 +85,24 @@ public partial class DashboardViewModel : ObservableObject
         TotalLength = ScopedLength();
         LengthLabel = $"{TotalLength} / {PathLimit}";
         LengthOverLimit = TotalLength >= PathLimit;
+
+        OnPropertyChanged(nameof(AttentionCount));
+        OnPropertyChanged(nameof(HasAttention));
+        OnPropertyChanged(nameof(EntryCount));
+        OnPropertyChanged(nameof(HealthTitle));
+        OnPropertyChanged(nameof(HealthSummary));
     }
+
+    private static string SentenceList(IReadOnlyList<string> parts) => parts.Count switch
+    {
+        0 => "No issues detected",
+        1 => Capitalize(parts[0]),
+        2 => $"{Capitalize(parts[0])} and {parts[1]}",
+        _ => $"{Capitalize(parts[0])}, {string.Join(", ", parts.Skip(1).Take(parts.Count - 2))}, and {parts[^1]}",
+    };
+
+    private static string Capitalize(string value) =>
+        string.IsNullOrEmpty(value) ? value : char.ToUpperInvariant(value[0]) + value[1..];
 
     private IEnumerable<PathEntry> ScopedEntries() => Scope switch
     {

@@ -3,141 +3,219 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:conv="clr-namespace:EnvMaid.App.Converters">
     <UserControl.Resources>
-        <conv:ConflictConfidenceConverter x:Key="Confidence"/>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
         <conv:InverseBooleanToVisibilityConverter x:Key="InverseBoolToVis"/>
-
-        <Style x:Key="ActionButton" TargetType="Button">
-            <Setter Property="Background" Value="#313244"/>
-            <Setter Property="Foreground" Value="#CDD6F4"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Padding" Value="10,5"/>
-            <Setter Property="Margin" Value="0,0,8,0"/>
-            <Setter Property="FontSize" Value="12"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}" CornerRadius="4" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#45475A"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
+        <conv:ConflictConfidenceConverter x:Key="Confidence"/>
     </UserControl.Resources>
 
-    <Grid Margin="0,10,0,0">
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="300"/>
-            <ColumnDefinition Width="*"/>
-        </Grid.ColumnDefinitions>
+    <Grid Margin="0,14,0,0">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <!-- CLI tool list toolbar -->
-        <StackPanel Grid.Row="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,10">
-            <TextBlock Text="Known CLI tools drive conflict confidence." Foreground="#6C7086"
-                       FontSize="12" VerticalAlignment="Center" Margin="0,0,12,0"/>
-            <Button Content="Edit my list" Style="{StaticResource ActionButton}" Click="OpenToolsFile_Click"/>
-            <Button Content="Reload" Style="{StaticResource ActionButton}" Click="ReloadTools_Click"/>
-            <Button Content="View built-in list" Style="{StaticResource ActionButton}" Click="ViewBuiltIn_Click"/>
+        <Grid Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel>
+                <TextBlock Text="Command priority" Style="{StaticResource SectionTitle}"/>
+                <TextBlock Text="Windows uses the first available copy of each command."
+                           Style="{StaticResource MutedText}" Margin="0,4,0,0"/>
+            </StackPanel>
+            <Button x:Name="ConflictToolsButton"
+                    Grid.Column="1"
+                    Content="Tool list"
+                    Style="{StaticResource SecondaryButton}"
+                    Click="ConflictToolsButton_Click">
+                <Button.ContextMenu>
+                    <ContextMenu Background="{StaticResource ElevatedBrush}"
+                                 Foreground="{StaticResource TextBrush}"
+                                 BorderBrush="{StaticResource DividerBrush}">
+                        <MenuItem Header="Edit my CLI tool list…" Click="OpenToolsFile_Click"/>
+                        <MenuItem Header="Reload tool list" Click="ReloadTools_Click"/>
+                        <Separator/>
+                        <MenuItem Header="View built-in list…" Click="ViewBuiltIn_Click"/>
+                    </ContextMenu>
+                </Button.ContextMenu>
+            </Button>
+        </Grid>
+
+        <StackPanel Grid.Row="1"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Visibility="{Binding HasConflicts, Converter={StaticResource InverseBoolToVis}}">
+            <TextBlock Text="No command-priority concerns detected."
+                       Style="{StaticResource SectionTitle}"
+                       HorizontalAlignment="Center"/>
+            <TextBlock Text="Each command resolves to a single location."
+                       Style="{StaticResource MutedText}"
+                       Margin="0,6,0,0"
+                       HorizontalAlignment="Center"/>
         </StackPanel>
 
-        <!-- No-conflicts message -->
-        <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="No conflicts detected." Foreground="#A6E3A1"
-                   FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center"
-                   Visibility="{Binding HasConflicts, Converter={StaticResource InverseBoolToVis}}"/>
+        <Grid Grid.Row="1" Visibility="{Binding HasConflicts, Converter={StaticResource BoolToVis}}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="290"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
 
-        <!-- Master: group list -->
-        <ListBox Grid.Row="1" Grid.Column="0" ItemsSource="{Binding Groups}" SelectedItem="{Binding SelectedGroup}"
-                 Background="#181825" BorderThickness="0" Foreground="#CDD6F4"
-                 Visibility="{Binding HasConflicts, Converter={StaticResource BoolToVis}}">
-            <ListBox.ItemContainerStyle>
-                <Style TargetType="ListBoxItem">
-                    <Setter Property="Padding" Value="10,8"/>
-                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                </Style>
-            </ListBox.ItemContainerStyle>
-            <ListBox.ItemTemplate>
-                <DataTemplate>
+            <ListBox ItemsSource="{Binding Groups}"
+                     SelectedItem="{Binding SelectedGroup}"
+                     Background="Transparent"
+                     BorderBrush="{StaticResource DividerBrush}"
+                     BorderThickness="0,1,1,0"
+                     Foreground="{StaticResource TextBrush}"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="Padding" Value="12,10"/>
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                        <Setter Property="Background" Value="Transparent"/>
+                        <Setter Property="BorderBrush" Value="{StaticResource DividerBrush}"/>
+                        <Setter Property="BorderThickness" Value="0,0,0,1"/>
+                        <Style.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter Property="Background" Value="#202A38"/>
+                            </Trigger>
+                        </Style.Triggers>
+                    </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{Binding ExeName}"
+                                       FontFamily="Cascadia Mono"
+                                       TextTrimming="CharacterEllipsis"/>
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding Losers.Count, StringFormat={}{0} other}"
+                                       Style="{StaticResource MutedText}"
+                                       Margin="10,0,0,0"/>
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+
+            <ScrollViewer Grid.Column="1"
+                          VerticalScrollBarVisibility="Auto"
+                          Margin="24,0,0,0">
+                <StackPanel DataContext="{Binding SelectedGroup}">
                     <StackPanel Orientation="Horizontal">
-                        <Border Width="10" Height="10" CornerRadius="5" Margin="0,0,10,0"
-                                VerticalAlignment="Center"
-                                Background="{Binding Confidence, Converter={StaticResource Confidence}, ConverterParameter=brush}"/>
-                        <TextBlock Text="{Binding ExeName}" Foreground="#CDD6F4" FontSize="13"
-                                   VerticalAlignment="Center"/>
-                        <TextBlock Text="{Binding Losers.Count, StringFormat=' ({0})'}"
-                                   Foreground="#6C7086" FontSize="12" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding ExeName}"
+                                   Style="{StaticResource PageTitle}"
+                                   FontFamily="Cascadia Mono"
+                                   FontSize="23"/>
+                        <Border Background="{StaticResource ElevatedBrush}"
+                                CornerRadius="10"
+                                Padding="9,3"
+                                Margin="12,3,0,0"
+                                VerticalAlignment="Top">
+                            <TextBlock Text="{Binding Confidence, Converter={StaticResource Confidence}}"
+                                       Style="{StaticResource MutedText}"/>
+                        </Border>
                     </StackPanel>
-                </DataTemplate>
-            </ListBox.ItemTemplate>
-        </ListBox>
+                    <TextBlock Text="Resolution order"
+                               Style="{StaticResource EyebrowText}"
+                               Margin="0,22,0,10"/>
 
-        <!-- Detail: selected group -->
-        <ScrollViewer Grid.Row="1" Grid.Column="1" Margin="16,0,0,0" VerticalScrollBarVisibility="Auto"
-                      Visibility="{Binding HasConflicts, Converter={StaticResource BoolToVis}}">
-            <StackPanel>
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,12"
-                            DataContext="{Binding SelectedGroup}">
-                    <TextBlock Text="{Binding ExeName}" Foreground="#CDD6F4" FontSize="20" FontWeight="Bold"/>
-                    <Border CornerRadius="10" Padding="8,3" Margin="12,2,0,0" VerticalAlignment="Center"
-                            Background="{Binding Confidence, Converter={StaticResource Confidence}, ConverterParameter=brush}">
-                        <TextBlock Text="{Binding Confidence, Converter={StaticResource Confidence}}"
-                                   Foreground="#1E1E2E" FontSize="11" FontWeight="SemiBold"/>
-                    </Border>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="28"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0"
+                                Width="1"
+                                Background="{StaticResource DividerBrush}"
+                                HorizontalAlignment="Center"
+                                Margin="0,12,0,0"/>
+                        <Ellipse Grid.Column="0"
+                                 Width="12"
+                                 Height="12"
+                                 Fill="{StaticResource AccentBrush}"
+                                 HorizontalAlignment="Center"
+                                 VerticalAlignment="Top"
+                                 Margin="0,5,0,0"/>
+                        <StackPanel Grid.Column="1" Margin="4,0,0,22">
+                            <TextBlock Text="Currently used" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding Winner.DisplayPath}"
+                                       FontFamily="Cascadia Mono"
+                                       TextWrapping="Wrap"
+                                       Margin="0,5,0,0"/>
+                            <TextBlock Text="{Binding Winner.Scope, StringFormat={}Scope: {0}}"
+                                       Style="{StaticResource MutedText}"
+                                       Margin="0,4,0,0"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <ItemsControl ItemsSource="{Binding DataContext.SelectedLosers,
+                                                       RelativeSource={RelativeSource AncestorType=UserControl}}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="28"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0"
+                                            Width="1"
+                                            Background="{StaticResource DividerBrush}"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Top"
+                                            Height="28"/>
+                                    <Ellipse Grid.Column="0"
+                                             Width="10"
+                                             Height="10"
+                                             Fill="{StaticResource CanvasBrush}"
+                                             Stroke="{StaticResource MutedTextBrush}"
+                                             StrokeThickness="2"
+                                             HorizontalAlignment="Center"
+                                             VerticalAlignment="Top"
+                                             Margin="0,5,0,0"/>
+                                    <StackPanel Grid.Column="1" Margin="4,0,0,24">
+                                        <TextBlock Text="Other available copy" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{Binding DisplayPath}"
+                                                   FontFamily="Cascadia Mono"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,5,0,0"/>
+                                        <TextBlock Text="{Binding Scope, StringFormat={}Scope: {0}}"
+                                                   Style="{StaticResource MutedText}"
+                                                   Margin="0,4,0,0"/>
+                                        <TextBlock Text="System PATH is searched before User PATH, so reordering cannot change this result."
+                                                   Foreground="{StaticResource AttentionBrush}"
+                                                   FontSize="12"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,8,0,0"
+                                                   Visibility="{Binding IsCrossScope, Converter={StaticResource BoolToVis}}"/>
+                                        <WrapPanel Margin="0,10,0,0">
+                                            <Button Content="Use this version"
+                                                    Style="{StaticResource SecondaryButton}"
+                                                    Visibility="{Binding CanReorder, Converter={StaticResource BoolToVis}}"
+                                                    Command="{Binding DataContext.UseVersionCommand,
+                                                                      RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    CommandParameter="{Binding}"
+                                                    Margin="0,0,8,8"/>
+                                            <Button Content="Remove from PATH"
+                                                    Style="{StaticResource DangerButton}"
+                                                    Command="{Binding DataContext.DeleteLoserCommand,
+                                                                      RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    CommandParameter="{Binding}"
+                                                    Margin="0,0,8,8"/>
+                                        </WrapPanel>
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                 </StackPanel>
-
-                <!-- Winner -->
-                <TextBlock Text="Winner (this copy runs):" Foreground="#A6ADC8" FontSize="12" Margin="0,0,0,4"/>
-                <Border Background="#1E3A2E" CornerRadius="4" Padding="10,8" Margin="0,0,0,14"
-                        DataContext="{Binding SelectedGroup}">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="✓" Foreground="#A6E3A1" FontSize="13" FontWeight="Bold" Margin="0,0,8,0"/>
-                        <TextBlock Text="{Binding Winner.DisplayPath}" Foreground="#CDD6F4" FontSize="13"/>
-                        <TextBlock Text="{Binding Winner.Scope, StringFormat='  [{0}]'}" Foreground="#6C7086" FontSize="12"/>
-                    </StackPanel>
-                </Border>
-
-                <!-- Losers -->
-                <TextBlock Text="Shadowed copies (do not run):" Foreground="#A6ADC8" FontSize="12" Margin="0,0,0,4"/>
-                <ItemsControl ItemsSource="{Binding SelectedLosers}">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <Border Background="#181825" CornerRadius="4" Padding="10,8" Margin="0,0,0,8">
-                                <StackPanel>
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="{Binding DisplayPath}" Foreground="#CDD6F4" FontSize="13"/>
-                                        <TextBlock Text="{Binding Scope, StringFormat='  [{0}]'}" Foreground="#6C7086" FontSize="12"/>
-                                    </StackPanel>
-
-                                    <!-- Cross-scope advisory -->
-                                    <TextBlock Foreground="#FAB387" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"
-                                               Visibility="{Binding IsCrossScope, Converter={StaticResource BoolToVis}}"
-                                               Text="System PATH always resolves before User PATH — reordering can't fix this. Delete the losing copy to resolve."/>
-
-                                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                                        <Button Content="Pick winner (reorder)" Style="{StaticResource ActionButton}"
-                                                Visibility="{Binding CanReorder, Converter={StaticResource BoolToVis}}"
-                                                Command="{Binding DataContext.PickWinnerOverCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                CommandParameter="{Binding}"/>
-                                        <Button Content="Delete this folder" Style="{StaticResource ActionButton}"
-                                                Command="{Binding DataContext.DeleteLoserCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                CommandParameter="{Binding}"/>
-                                    </StackPanel>
-                                </StackPanel>
-                            </Border>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </StackPanel>
-        </ScrollViewer>
+            </ScrollViewer>
+        </Grid>
     </Grid>
 </UserControl>

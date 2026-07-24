@@ -32,7 +32,11 @@ public class PathDiffServiceTests
         var diff = _sut.Diff(PathScope.User, new[] { "a", "b", "c" }, new[] { "c", "b", "a" });
 
         Assert.True(diff.OrderChanged);
-        Assert.Empty(diff.Changes); // same set, only order differs
+        Assert.Contains(diff.Changes, change =>
+            change.Kind == PathChangeKind.Moved &&
+            change.Path == "a" &&
+            change.PreviousPosition == 1 &&
+            change.NewPosition == 3);
     }
 
     [Fact]
@@ -53,7 +57,7 @@ public class PathDiffServiceTests
         var removed = Assert.Single(diff.Changes);
         Assert.Equal(PathChangeKind.Removed, removed.Kind);
         Assert.Equal("(empty entry)", removed.DisplayPath);
-        Assert.Equal("empty entry", removed.Reason);
+        Assert.Equal("Empty entry.", removed.Reason);
     }
 
     [Fact]
@@ -62,7 +66,7 @@ public class PathDiffServiceTests
         var missing = "Z:\\definitely\\not\\here\\" + Guid.NewGuid();
         var diff = _sut.Diff(PathScope.User, new[] { missing }, Array.Empty<string>());
 
-        Assert.Equal("folder did not exist", Assert.Single(diff.Changes).Reason);
+        Assert.Equal("Folder did not exist.", Assert.Single(diff.Changes).Reason);
     }
 
     [Fact]
@@ -71,5 +75,50 @@ public class PathDiffServiceTests
         var diff = _sut.Diff(PathScope.User, new[] { "C:\\Tools" }, new[] { "c:\\tools" });
 
         Assert.False(diff.HasChanges);
+    }
+
+    [Fact]
+    public void NormalizedStoredValue_IsPresentedAsOneChange()
+    {
+        var diff = _sut.Diff(
+            PathScope.User,
+            new[] { @"C:\Tools\" },
+            new[] { @"C:\Tools" });
+
+        var change = Assert.Single(diff.Changes);
+        Assert.Equal(PathChangeKind.Changed, change.Kind);
+        Assert.Equal(@"C:\Tools\", change.PreviousPath);
+        Assert.Equal(@"C:\Tools", change.Path);
+    }
+
+    [Fact]
+    public void AddRemoveWithoutRelativeReorder_HasNoMoveChanges()
+    {
+        var diff = _sut.Diff(
+            PathScope.User,
+            new[] { "a", "b", "c" },
+            new[] { "a", "c", "d" });
+
+        Assert.DoesNotContain(diff.Changes, change => change.Kind == PathChangeKind.Moved);
+    }
+
+    [Fact]
+    public void NormalizedEntryThatAlsoMoves_ReportsBothChangeAndMove()
+    {
+        var diff = _sut.Diff(
+            PathScope.User,
+            new[] { @"C:\A\", @"C:\B" },
+            new[] { @"C:\B", @"C:\A" });
+
+        Assert.True(diff.OrderChanged);
+        Assert.Contains(diff.Changes, change =>
+            change.Kind == PathChangeKind.Changed &&
+            change.PreviousPath == @"C:\A\" &&
+            change.Path == @"C:\A");
+        Assert.Contains(diff.Changes, change =>
+            change.Kind == PathChangeKind.Moved &&
+            change.Path == @"C:\A" &&
+            change.PreviousPosition == 1 &&
+            change.NewPosition == 2);
     }
 }

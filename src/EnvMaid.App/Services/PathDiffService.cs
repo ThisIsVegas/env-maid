@@ -3,63 +3,158 @@ using EnvMaid.App.Models;
 
 namespace EnvMaid.App.Services;
 
-public enum PathChangeKind { Added, Removed }
-
-/// <summary><see cref="Reason"/> annotates a removal (e.g. "Folder does not exist")
-/// so the review dialog explains why the entry was dropped; null for additions.</summary>
-public record PathChange(PathChangeKind Kind, string Path, string? Reason = null)
+public enum PathChangeKind
 {
-    /// <summary>Human-readable path text, so an empty PATH entry doesn't render as a bare dash.</summary>
-    public string DisplayPath => string.IsNullOrWhiteSpace(Path) ? "(empty entry)" : Path;
+    Added,
+    Removed,
+    Changed,
+    Moved,
 }
 
-/// <summary>Changes to one scope's PATH: additions, removals, and whether the
-/// surviving entries were reordered.</summary>
+public record PathChange(
+    PathChangeKind Kind,
+    string Path,
+    string? Reason = null,
+    string? PreviousPath = null,
+    int? PreviousPosition = null,
+    int? NewPosition = null)
+{
+    public string DisplayPath => string.IsNullOrWhiteSpace(Path) ? "(empty entry)" : Path;
+    public string? DisplayPreviousPath =>
+        PreviousPath is null
+            ? null
+            : string.IsNullOrWhiteSpace(PreviousPath) ? "(empty entry)" : PreviousPath;
+}
+
 public record ScopeDiff(
     PathScope Scope,
     IReadOnlyList<PathChange> Changes,
     bool OrderChanged)
 {
-    public bool HasChanges => Changes.Count > 0 || OrderChanged;
+    public bool HasChanges => Changes.Count > 0;
 }
 
 /// <summary>
-/// Computes what a save would do: compares the current (real) PATH against the
-/// staged entries per scope. Order comparison ignores added/removed entries and
-/// only asks whether the entries present in both kept their relative order.
+/// Computes the exact stored-value changes for one PATH scope while using normalized
+/// path equality to recognize formatting/compression edits as changes to one location.
 /// </summary>
 public class PathDiffService
 {
-    public ScopeDiff Diff(PathScope scope, IReadOnlyList<string> current, IReadOnlyList<string> staged)
+    private readonly PathNormalizer _normalizer = new();
+
+    public ScopeDiff Diff(
+        PathScope scope,
+        IReadOnlyList<string> current,
+        IReadOnlyList<string> staged)
     {
-        var currentSet = new HashSet<string>(current, StringComparer.OrdinalIgnoreCase);
-        var stagedSet = new HashSet<string>(staged, StringComparer.OrdinalIgnoreCase);
-
+        var currentMatched = new bool[current.Count];
+        var stagedMatched = new bool[staged.Count];
+        var matchedPairs = new List<(int CurrentIndex, int StagedIndex, string Path)>();
         var changes = new List<PathChange>();
-        foreach (var path in staged)
-            if (!currentSet.Contains(path))
-                changes.Add(new PathChange(PathChangeKind.Added, path));
-        foreach (var path in current)
-            if (!stagedSet.Contains(path))
-                changes.Add(new PathChange(PathChangeKind.Removed, path, RemovalReason(path)));
 
-        // Order changed: the entries present in both, compared in each list's order.
-        var currentSurviving = current.Where(stagedSet.Contains).ToList();
-        var stagedSurviving = staged.Where(currentSet.Contains).ToList();
-        var orderChanged = !currentSurviving.SequenceEqual(stagedSurviving, StringComparer.OrdinalIgnoreCase);
+        // Match identical stored values first so genuine reorders stay visible.
+        for (var currentIndex = 0; currentIndex < current.Count; currentIndex++)
+        {
+            var stagedIndex = FindMatch(
+                staged,
+                stagedMatched,
+                path => string.Equals(current[currentIndex], path, StringComparison.OrdinalIgnoreCase));
+            if (stagedIndex < 0)
+                continue;
 
-        return new ScopeDiff(scope, changes, orderChanged);
+            currentMatched[currentIndex] = true;
+            stagedMatched[stagedIndex] = true;
+            matchedPairs.Add((currentIndex, stagedIndex, current[currentIndex]));
+        }
+
+        // Pair normalized equivalents next. These are stored-value edits such as
+        // trailing-slash normalization or environment-variable compression.
+        for (var currentIndex = 0; currentIndex < current.Count; currentIndex++)
+        {
+            if (currentMatched[currentIndex])
+                continue;
+
+            var stagedIndex = FindMatch(
+                staged,
+                stagedMatched,
+                path => _normalizer.AreEquivalent(current[currentIndex], path));
+            if (stagedIndex < 0)
+                continue;
+
+            currentMatched[currentIndex] = true;
+            stagedMatched[stagedIndex] = true;
+            matchedPairs.Add((currentIndex, stagedIndex, staged[stagedIndex]));
+            changes.Add(new PathChange(
+                PathChangeKind.Changed,
+                staged[stagedIndex],
+                "Stored form changed; the location remains the same.",
+                current[currentIndex],
+                currentIndex + 1,
+                stagedIndex + 1));
+        }
+
+        for (var stagedIndex = 0; stagedIndex < staged.Count; stagedIndex++)
+            if (!stagedMatched[stagedIndex])
+                changes.Add(new PathChange(
+                    PathChangeKind.Added,
+                    staged[stagedIndex],
+                    PreviousPosition: null,
+                    NewPosition: stagedIndex + 1));
+
+        for (var currentIndex = 0; currentIndex < current.Count; currentIndex++)
+            if (!currentMatched[currentIndex])
+                changes.Add(new PathChange(
+                    PathChangeKind.Removed,
+                    current[currentIndex],
+                    RemovalReason(current[currentIndex]),
+                    PreviousPosition: currentIndex + 1));
+
+        var currentOrder = matchedPairs.OrderBy(pair => pair.CurrentIndex).ToList();
+        var stagedOrder = matchedPairs.OrderBy(pair => pair.StagedIndex).ToList();
+        var currentRanks = currentOrder
+            .Select((pair, rank) => (pair, rank))
+            .ToDictionary(item => item.pair.CurrentIndex, item => item.rank);
+        var stagedRanks = stagedOrder
+            .Select((pair, rank) => (pair, rank))
+            .ToDictionary(item => item.pair.CurrentIndex, item => item.rank);
+
+        foreach (var pair in matchedPairs)
+        {
+            if (currentRanks[pair.CurrentIndex] == stagedRanks[pair.CurrentIndex])
+                continue;
+
+            changes.Add(new PathChange(
+                PathChangeKind.Moved,
+                pair.Path,
+                "Priority changed.",
+                PreviousPosition: pair.CurrentIndex + 1,
+                NewPosition: pair.StagedIndex + 1));
+        }
+
+        return new ScopeDiff(
+            scope,
+            changes,
+            changes.Any(change => change.Kind == PathChangeKind.Moved));
     }
 
-    // Best-effort explanation for why a removed entry was likely flagged. Covers the
-    // unambiguous cases (empty / missing folder); other removals just show no reason.
+    private static int FindMatch(
+        IReadOnlyList<string> paths,
+        IReadOnlyList<bool> matched,
+        Func<string, bool> predicate)
+    {
+        for (var index = 0; index < paths.Count; index++)
+            if (!matched[index] && predicate(paths[index]))
+                return index;
+        return -1;
+    }
+
     private static string? RemovalReason(string path)
     {
         var expanded = Environment.ExpandEnvironmentVariables(path);
         if (string.IsNullOrWhiteSpace(expanded))
-            return "empty entry";
+            return "Empty entry.";
         if (!Directory.Exists(expanded))
-            return "folder did not exist";
+            return "Folder did not exist.";
         return null;
     }
 }

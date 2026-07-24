@@ -17,6 +17,13 @@ public partial class PathListViewModel : ObservableObject
 
     private readonly PathNormalizer _normalizer;
     private readonly PathCompressor _compressor;
+    private bool _isLoading;
+    private int _changeBatchDepth;
+    private bool _hasPendingChangeNotification;
+
+    public Func<MaintenancePreview, bool>? ConfirmMaintenance { get; set; }
+
+    public event EventHandler? EntriesChanged;
 
     public PathScope Scope { get; }
 
@@ -26,10 +33,16 @@ public partial class PathListViewModel : ObservableObject
     private PathEntry? _selectedEntry;
 
     [ObservableProperty]
+    private bool _isBulkSelectionMode;
+
+    [ObservableProperty]
     private int _totalLength;
 
     [ObservableProperty]
     private string _lengthLabel = "Length: 0 / 2047";
+
+    [ObservableProperty]
+    private bool _lengthOverLimit;
 
     private static readonly SolidColorBrush GreenBrush = new(Color.FromRgb(0xA6, 0xE3, 0xA1));
     private static readonly SolidColorBrush OrangeBrush = new(Color.FromRgb(0xFA, 0xB3, 0x87));
@@ -48,29 +61,85 @@ public partial class PathListViewModel : ObservableObject
         Scope = scope;
         _normalizer = normalizer;
         _compressor = compressor;
-        Entries.CollectionChanged += (_, _) => RecalculateLength();
+        Entries.CollectionChanged += (_, _) =>
+        {
+            RecalculateLength();
+            NotifyEntriesChanged();
+        };
     }
 
     public void LoadEntries(IEnumerable<string> paths)
     {
-        Entries.Clear();
-        foreach (var p in paths)
-            Entries.Add(new PathEntry(p, Scope));
-
-        foreach (var entry in Entries)
-            entry.PropertyChanged += (_, e) =>
+        _isLoading = true;
+        try
+        {
+            Entries.Clear();
+            foreach (var path in paths)
             {
-                if (e.PropertyName == nameof(PathEntry.Path))
-                    RecalculateLength();
-            };
+                Entries.Add(CreateEntry(path));
+            }
+        }
+        finally
+        {
+            _isLoading = false;
+        }
 
         RecalculateLength();
+        EntriesChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void Entry_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(PathEntry.Path))
+            return;
+
+        RecalculateLength();
+        NotifyEntriesChanged();
+    }
+
+    private PathEntry CreateEntry(string path)
+    {
+        var entry = new PathEntry(path, Scope);
+        entry.PropertyChanged += Entry_PropertyChanged;
+        return entry;
+    }
+
+    private void NotifyEntriesChanged()
+    {
+        if (_isLoading)
+            return;
+        if (_changeBatchDepth > 0)
+        {
+            _hasPendingChangeNotification = true;
+            return;
+        }
+
+        EntriesChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void RunChangeBatch(Action action)
+    {
+        _changeBatchDepth++;
+        try
+        {
+            action();
+        }
+        finally
+        {
+            _changeBatchDepth--;
+            if (_changeBatchDepth == 0 && _hasPendingChangeNotification)
+            {
+                _hasPendingChangeNotification = false;
+                EntriesChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
     }
 
     public void RecalculateLength()
     {
         TotalLength = string.Join(';', Entries.Select(e => e.Path)).Length;
         LengthLabel = $"Length: {TotalLength} / {PathLimit}";
+        LengthOverLimit = TotalLength >= PathLimit;
         BarColor = TotalLength >= PathLimit ? RedBrush : TotalLength >= WarningThreshold ? OrangeBrush : GreenBrush;
 
         var cumulative = 0;
@@ -95,8 +164,21 @@ public partial class PathListViewModel : ObservableObject
     [RelayCommand]
     private void RemoveChecked()
     {
-        foreach (var entry in Entries.Where(e => e.IsChecked).ToList())
-            Entries.Remove(entry);
+        RunChangeBatch(() =>
+        {
+            foreach (var entry in Entries.Where(e => e.IsChecked).ToList())
+                Entries.Remove(entry);
+        });
+        IsBulkSelectionMode = false;
+    }
+
+    [RelayCommand]
+    private void ToggleBulkSelection()
+    {
+        IsBulkSelectionMode = !IsBulkSelectionMode;
+        if (!IsBulkSelectionMode)
+            foreach (var entry in Entries)
+                entry.IsChecked = false;
     }
 
     /// <summary>Rewrite every entry to its canonical form (trailing slash / redundant
@@ -104,12 +186,35 @@ public partial class PathListViewModel : ObservableObject
     [RelayCommand]
     private void Normalize()
     {
-        foreach (var entry in Entries)
+        var candidates = Entries
+            .Select(entry => (Entry: entry, After: _normalizer.Normalize(entry.Path)))
+            .Where(item => item.After != item.Entry.Path)
+            .ToList();
+        var changes = candidates
+            .Select(item => new MaintenanceChange(
+                MaintenanceChangeKind.Change,
+                item.Entry.Path,
+                item.After,
+                "The location resolves to the same folder."))
+            .ToList();
+        var operations = candidates.Zip(changes).ToList();
+
+        var preview = new MaintenancePreview(
+            Scope,
+            $"Normalize {changes.Count} PATH {(changes.Count == 1 ? "entry" : "entries")}?",
+            changes.Count == 0
+                ? "Every entry is already normalized."
+                : "These changes alter how paths are written, not which folders they resolve to.",
+            $"Stage {changes.Count} {(changes.Count == 1 ? "change" : "changes")}",
+            changes);
+        if (!Confirm(preview))
+            return;
+
+        RunChangeBatch(() =>
         {
-            var normalized = _normalizer.Normalize(entry.Path);
-            if (normalized != entry.Path)
-                entry.Path = normalized;
-        }
+            foreach (var operation in operations.Where(operation => operation.Second.IsSelected))
+                operation.First.Entry.Path = operation.First.After;
+        });
     }
 
     /// <summary>Remove entries that repeat an earlier one in THIS scope (first kept),
@@ -118,9 +223,45 @@ public partial class PathListViewModel : ObservableObject
     private void RemoveDuplicates()
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var entry in Entries.ToList())
-            if (!seen.Add(_normalizer.Normalize(entry.Path)))
-                Entries.Remove(entry);
+        var firstPositions = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var duplicates = new List<(PathEntry Entry, MaintenanceChange Change)>();
+        var changes = new List<MaintenanceChange>();
+
+        for (var index = 0; index < Entries.Count; index++)
+        {
+            var entry = Entries[index];
+            var normalized = _normalizer.Normalize(entry.Path);
+            if (seen.Add(normalized))
+            {
+                firstPositions[normalized] = index + 1;
+                continue;
+            }
+
+            var change = new MaintenanceChange(
+                MaintenanceChangeKind.Remove,
+                entry.Path,
+                null,
+                $"Duplicate of position {firstPositions[normalized]}; the first entry will be kept.");
+            duplicates.Add((entry, change));
+            changes.Add(change);
+        }
+
+        var preview = new MaintenancePreview(
+            Scope,
+            $"Remove {changes.Count} duplicate {(changes.Count == 1 ? "entry" : "entries")}?",
+            changes.Count == 0
+                ? "No duplicate entries were found."
+                : "The first occurrence of each location will be kept.",
+            $"Stage {changes.Count} {(changes.Count == 1 ? "removal" : "removals")}",
+            changes);
+        if (!Confirm(preview))
+            return;
+
+        RunChangeBatch(() =>
+        {
+            foreach (var item in duplicates.Where(item => item.Change.IsSelected))
+                Entries.Remove(item.Entry);
+        });
     }
 
     /// <summary>Remove entries whose folder is missing or empty (the High-confidence
@@ -128,9 +269,36 @@ public partial class PathListViewModel : ObservableObject
     [RelayCommand]
     private void RemoveBroken()
     {
-        foreach (var entry in Entries.Where(e =>
-                     e.Flags.HasFlag(PathFlag.Missing) || e.Flags.HasFlag(PathFlag.Empty)).ToList())
-            Entries.Remove(entry);
+        var candidates = Entries.Where(e =>
+                e.Flags.HasFlag(PathFlag.Missing) || e.Flags.HasFlag(PathFlag.Empty))
+            .ToList();
+        var changes = candidates
+            .Select(entry => new MaintenanceChange(
+                MaintenanceChangeKind.Remove,
+                entry.Path,
+                null,
+                entry.Flags.HasFlag(PathFlag.Empty)
+                    ? "The entry is empty."
+                    : "The folder no longer exists."))
+            .ToList();
+        var operations = candidates.Zip(changes).ToList();
+
+        var preview = new MaintenancePreview(
+            Scope,
+            $"Remove {changes.Count} missing {(changes.Count == 1 ? "location" : "locations")}?",
+            changes.Count == 0
+                ? "No missing or empty locations were found."
+                : "Only PATH entries will be removed. No files or folders will be deleted.",
+            $"Stage {changes.Count} {(changes.Count == 1 ? "removal" : "removals")}",
+            changes);
+        if (!Confirm(preview))
+            return;
+
+        RunChangeBatch(() =>
+        {
+            foreach (var operation in operations.Where(operation => operation.Second.IsSelected))
+                Entries.Remove(operation.First);
+        });
     }
 
     /// <summary>Fold known Windows variables back into literal entries (e.g. %LOCALAPPDATA%)
@@ -138,12 +306,46 @@ public partial class PathListViewModel : ObservableObject
     [RelayCommand]
     private void Compress()
     {
-        foreach (var entry in Entries)
+        var candidates = Entries
+            .Select(entry => (Entry: entry, After: _compressor.Compress(entry.Path)))
+            .Where(item => item.After != item.Entry.Path)
+            .ToList();
+        var changes = candidates
+            .Select(item => new MaintenanceChange(
+                MaintenanceChangeKind.Change,
+                item.Entry.Path,
+                item.After,
+                "The stored value becomes shorter while resolving to the same folder."))
+            .ToList();
+        var operations = candidates.Zip(changes).ToList();
+
+        var preview = new MaintenancePreview(
+            Scope,
+            $"Compress {changes.Count} PATH {(changes.Count == 1 ? "entry" : "entries")}?",
+            changes.Count == 0
+                ? "No entries can be shortened with known environment variables."
+                : "Environment variables will shorten the stored values without changing their locations.",
+            $"Stage {changes.Count} {(changes.Count == 1 ? "change" : "changes")}",
+            changes);
+        if (!Confirm(preview))
+            return;
+
+        RunChangeBatch(() =>
         {
-            var compressed = _compressor.Compress(entry.Path);
-            if (compressed != entry.Path)
-                entry.Path = compressed;
+            foreach (var operation in operations.Where(operation => operation.Second.IsSelected))
+                operation.First.Entry.Path = operation.First.After;
+        });
+    }
+
+    private bool Confirm(MaintenancePreview preview)
+    {
+        if (!preview.HasChanges)
+        {
+            ConfirmMaintenance?.Invoke(preview);
+            return false;
         }
+
+        return ConfirmMaintenance?.Invoke(preview) ?? true;
     }
 
     [RelayCommand]
@@ -151,7 +353,7 @@ public partial class PathListViewModel : ObservableObject
     {
         var input = PromptForPath("Add Path", string.Empty);
         if (!string.IsNullOrWhiteSpace(input))
-            Entries.Add(new PathEntry(input, Scope));
+            Entries.Add(CreateEntry(input));
     }
 
     [RelayCommand]

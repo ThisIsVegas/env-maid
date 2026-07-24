@@ -14,6 +14,13 @@ namespace EnvMaid.App.Services;
 /// </summary>
 public class PathNormalizer
 {
+    public bool AreEquivalent(string left, string right)
+    {
+        var normalizedLeft = Normalize(Environment.ExpandEnvironmentVariables(left));
+        var normalizedRight = Normalize(Environment.ExpandEnvironmentVariables(right));
+        return string.Equals(normalizedLeft, normalizedRight, StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>Returns the canonical form of <paramref name="entry"/>. Empty/whitespace
     /// entries are returned unchanged so existing "empty entry" flagging still applies.</summary>
     public string Normalize(string entry)

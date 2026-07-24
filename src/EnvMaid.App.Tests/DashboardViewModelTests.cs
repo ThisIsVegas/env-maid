@@ -63,4 +63,20 @@ public class DashboardViewModelTests
 
         Assert.Equal(1, vm.DuplicateCount);
     }
+
+    [Fact]
+    public void HealthSummary_LeadsWithPlainLanguageConclusion()
+    {
+        var user = new PathListViewModel(PathScope.User);
+        var system = new PathListViewModel(PathScope.System);
+        user.Entries.Add(new PathEntry("gone", PathScope.User) { Flags = PathFlag.Missing });
+        user.Entries.Add(new PathEntry("dup", PathScope.User) { Flags = PathFlag.Duplicate });
+
+        var vm = new DashboardViewModel(user, system, EmptyConflicts(user, system));
+        vm.Refresh();
+
+        Assert.Equal("2 findings need attention", vm.HealthTitle);
+        Assert.Contains("missing or empty location", vm.HealthSummary);
+        Assert.Contains("duplicate entry", vm.HealthSummary);
+    }
 }

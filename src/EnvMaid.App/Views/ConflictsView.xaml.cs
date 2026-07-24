@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using EnvMaid.App.ViewModels;
 
 namespace EnvMaid.App.Views;
@@ -21,6 +22,16 @@ public partial class ConflictsView : UserControl
     }
 
     private MainViewModel? Main => (Window.GetWindow(this)?.DataContext) as MainViewModel;
+
+    private void ConflictToolsButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (ConflictToolsButton.ContextMenu is null)
+            return;
+
+        ConflictToolsButton.ContextMenu.PlacementTarget = ConflictToolsButton;
+        ConflictToolsButton.ContextMenu.Placement = PlacementMode.Bottom;
+        ConflictToolsButton.ContextMenu.IsOpen = true;
+    }
 
     private void OpenToolsFile_Click(object sender, RoutedEventArgs e)
     {

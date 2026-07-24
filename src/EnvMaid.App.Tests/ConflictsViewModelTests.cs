@@ -12,7 +12,7 @@ public class ConflictsViewModelTests
             Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".txt"))));
 
     [Fact]
-    public void PickWinner_SameScope_MovesWinnerAboveLoser()
+    public void UseVersion_SameScope_MovesSelectedAlternativeAboveCurrentWinner()
     {
         var winnerDir = CreateTempDir();
         var loserDir = CreateTempDir();
@@ -21,24 +21,19 @@ public class ConflictsViewModelTests
 
         var user = new PathListViewModel(PathScope.User);
         var system = new PathListViewModel(PathScope.System);
-        // loser first so winner is actually behind it
-        user.LoadEntries(new[] { loserDir, winnerDir });
+        user.LoadEntries(new[] { winnerDir, loserDir });
 
         var vm = new ConflictsViewModel(Analysis(), user, system);
         vm.Refresh();
 
-        // winner is loserDir's competitor: whichever resolves first is winner.
-        // Here loserDir is first in list, so it's the winner initially.
-        // Re-point: we want to verify reordering happens. Grab the loser item.
         var group = Assert.Single(vm.Groups);
         var loserItem = new LoserItem(group.Losers[0], group.Winner.Scope);
+        var selectedEntry = loserItem.Location.Entry;
 
-        var before = user.Entries.Select(e => e.Path).ToList();
-        vm.PickWinnerOverCommand.Execute(loserItem);
-        var after = user.Entries.Select(e => e.Path).ToList();
+        vm.UseVersionCommand.Execute(loserItem);
 
-        // Winner folder now sits at or above the loser's old position.
-        Assert.True(after.IndexOf(group.Winner.DisplayPath) <= before.IndexOf(group.Losers[0].DisplayPath));
+        Assert.Same(selectedEntry, user.Entries[0]);
+        Assert.Same(selectedEntry, vm.SelectedGroup?.Winner.Entry);
     }
 
     [Fact]

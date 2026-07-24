@@ -5,24 +5,26 @@
         Width="520" SizeToContent="Height"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
-        Background="#1E1E2E">
-    <Grid Margin="20">
+        Style="{StaticResource AppWindow}">
+    <Grid Margin="24">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <TextBlock x:Name="PromptText" Grid.Row="0" Foreground="#CDD6F4" FontSize="14" Margin="0,0,0,10"/>
+        <TextBlock x:Name="PromptText" Grid.Row="0" Style="{StaticResource SectionTitle}" Margin="0,0,0,12"/>
 
-        <TextBox x:Name="InputBox" Grid.Row="1" Height="30" Padding="6,4" FontSize="13"
-                 Background="#313244" Foreground="#CDD6F4" BorderBrush="#585B70" BorderThickness="1"/>
+        <TextBox x:Name="InputBox" Grid.Row="1" Height="36" Padding="9,7" FontSize="13"
+                 FontFamily="Cascadia Mono"
+                 Background="{StaticResource SurfaceBrush}" Foreground="{StaticResource TextBrush}"
+                 BorderBrush="{StaticResource DividerBrush}" BorderThickness="1"/>
 
         <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
-            <Button Content="Cancel" Width="80" Height="30" Margin="0,0,8,0" Click="Cancel_Click"
-                    Background="#45475A" Foreground="#CDD6F4" BorderThickness="0"/>
-            <Button Content="OK" Width="80" Height="30" Click="Ok_Click" IsDefault="True"
-                    Background="#89B4FA" Foreground="#1E1E2E" BorderThickness="0" FontWeight="SemiBold"/>
+            <Button Content="Cancel" Margin="0,0,8,0" Click="Cancel_Click"
+                    Style="{StaticResource GhostButton}"/>
+            <Button Content="Save path" Click="Ok_Click" IsDefault="True"
+                    Style="{StaticResource PrimaryButton}"/>
         </StackPanel>
     </Grid>
 </Window>

@@ -33,6 +33,21 @@ public partial class PathEntry : ObservableObject
 
     public bool HasShadowConflicts => ShadowConflicts.Count > 0;
 
+    public bool HasAttention => Flags != PathFlag.None || HasShadowConflicts;
+
+    public string StatusLabel
+    {
+        get
+        {
+            if (Flags.HasFlag(PathFlag.Missing)) return "Missing location";
+            if (Flags.HasFlag(PathFlag.Empty)) return "Empty entry";
+            if (Flags.HasFlag(PathFlag.Duplicate)) return "Duplicate";
+            if (HasShadowConflicts) return "Command priority";
+            if (Flags.HasFlag(PathFlag.NoExecutable)) return "Review";
+            return string.Empty;
+        }
+    }
+
     /// <summary>Worst (most-real) confidence among this entry's shadow conflicts,
     /// used to color the grid's conflict marker. Null when there are none.</summary>
     public ConflictConfidence? ShadowConfidence =>
@@ -47,7 +62,15 @@ public partial class PathEntry : ObservableObject
         ShadowConflicts.CollectionChanged += (_, _) =>
         {
             OnPropertyChanged(nameof(HasShadowConflicts));
+            OnPropertyChanged(nameof(HasAttention));
+            OnPropertyChanged(nameof(StatusLabel));
             OnPropertyChanged(nameof(ShadowConfidence));
         };
+    }
+
+    partial void OnFlagsChanged(PathFlag value)
+    {
+        OnPropertyChanged(nameof(HasAttention));
+        OnPropertyChanged(nameof(StatusLabel));
     }
 }

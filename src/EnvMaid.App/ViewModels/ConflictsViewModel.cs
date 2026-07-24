@@ -71,24 +71,24 @@ public partial class ConflictsViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Move the winner's folder directly above the loser's, so the loser's copy
-    /// stops being shadowed. Only valid when both are in the same scope.
+    /// Move the selected alternative directly above the current winner so the
+    /// selected copy becomes the version Windows resolves first.
     /// </summary>
     [RelayCommand]
-    private void PickWinnerOver(LoserItem? item)
+    private void UseVersion(LoserItem? item)
     {
         if (SelectedGroup is null || item is null || !item.CanReorder)
             return;
 
-        var loser = item.Location;
-        var winner = SelectedGroup.Winner;
-        var list = ScopeList(loser.Scope);
-        var winnerIndex = list.Entries.IndexOf(winner.Entry);
-        var loserIndex = list.Entries.IndexOf(loser.Entry);
-        if (winnerIndex < 0 || loserIndex < 0 || winnerIndex < loserIndex)
-            return; // already ahead or not found
+        var selected = item.Location;
+        var current = SelectedGroup.Winner;
+        var list = ScopeList(selected.Scope);
+        var currentIndex = list.Entries.IndexOf(current.Entry);
+        var selectedIndex = list.Entries.IndexOf(selected.Entry);
+        if (currentIndex < 0 || selectedIndex < 0 || selectedIndex < currentIndex)
+            return;
 
-        list.Entries.Move(winnerIndex, loserIndex);
+        list.Entries.Move(selectedIndex, currentIndex);
         Refresh();
     }
 

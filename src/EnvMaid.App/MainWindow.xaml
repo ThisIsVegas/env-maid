@@ -3,213 +3,248 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:views="clr-namespace:EnvMaid.App.Views"
         xmlns:conv="clr-namespace:EnvMaid.App.Converters"
-        Title="EnvMaid" Height="820" Width="1150" WindowStartupLocation="CenterScreen"
-        Background="#1E1E2E" FontFamily="Segoe UI">
-
+        Title="EnvMaid"
+        Width="1180"
+        Height="820"
+        MinWidth="920"
+        MinHeight="650"
+        WindowStartupLocation="CenterScreen"
+        Style="{StaticResource AppWindow}">
     <Window.Resources>
-        <conv:CountToBrushConverter x:Key="CountToBrush"/>
-        <conv:EnumToBoolConverter x:Key="EnumToBool"/>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+        <conv:InverseBooleanToVisibilityConverter x:Key="InverseBoolToVis"/>
 
-        <!-- Summary strip tile -->
-        <Style x:Key="StatTile" TargetType="Border">
-            <Setter Property="Background" Value="#313244"/>
-            <Setter Property="CornerRadius" Value="6"/>
-            <Setter Property="Padding" Value="14,10"/>
-            <Setter Property="Margin" Value="0,0,10,0"/>
-            <Setter Property="MinWidth" Value="120"/>
-        </Style>
-        <Style x:Key="TileLabel" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#A6ADC8"/>
-            <Setter Property="FontSize" Value="11"/>
-            <Setter Property="Margin" Value="0,0,0,2"/>
-        </Style>
-        <Style x:Key="TileValue" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#CDD6F4"/>
-            <Setter Property="FontSize" Value="22"/>
-            <Setter Property="FontWeight" Value="Bold"/>
-        </Style>
-
-        <!-- Scope toggle segment (radio styled as button) -->
-        <Style x:Key="ScopeSegment" TargetType="RadioButton">
-            <Setter Property="Foreground" Value="#A6ADC8"/>
-            <Setter Property="FontSize" Value="12"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="RadioButton">
-                        <Border Name="Seg" Background="#313244" Padding="12,6" Margin="0">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Seg" Property="Background" Value="#89B4FA"/>
-                                <Setter Property="Foreground" Value="#1E1E2E"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-        <Style x:Key="ToolbarButton" TargetType="Button">
-            <Setter Property="Background" Value="#313244"/>
-            <Setter Property="Foreground" Value="#CDD6F4"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Padding" Value="14,8"/>
-            <Setter Property="Margin" Value="0,0,8,0"/>
-            <Setter Property="FontSize" Value="13"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}" CornerRadius="4" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#45475A"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
-
-        <Style x:Key="AccentButton" TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
-            <Setter Property="Background" Value="#89B4FA"/>
-            <Setter Property="Foreground" Value="#1E1E2E"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#74A8FA"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
-
-        <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
-            <Setter Property="Background" Value="#F38BA8"/>
-            <Setter Property="Foreground" Value="#1E1E2E"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#EF6E90"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
-
-        <Style TargetType="TabItem">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Foreground" Value="#A6ADC8"/>
-            <Setter Property="FontSize" Value="14"/>
-            <Setter Property="Padding" Value="16,10"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="TabItem">
-                        <Border Name="Border" BorderThickness="0,0,0,2" BorderBrush="Transparent" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter ContentSource="Header" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Border" Property="BorderBrush" Value="#89B4FA"/>
-                                <Setter Property="Foreground" Value="#CDD6F4"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <Style TargetType="TabControl">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="BorderThickness" Value="0"/>
+        <Style x:Key="IssueRow" TargetType="Border">
+            <Setter Property="BorderBrush" Value="{StaticResource DividerBrush}"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+            <Setter Property="Padding" Value="0,14"/>
         </Style>
     </Window.Resources>
 
-    <DockPanel Margin="16">
-        <TextBlock DockPanel.Dock="Top" Text="EnvMaid" FontSize="22" FontWeight="Bold"
-                   Foreground="#CDD6F4" Margin="0,0,0,4"/>
-        <TextBlock DockPanel.Dock="Top" Text="{Binding StatusMessage}" Foreground="#A6ADC8" FontSize="12" Margin="0,0,0,12"/>
+    <DockPanel Margin="24,18,24,20">
+        <Grid DockPanel.Dock="Top" Margin="0,0,0,4">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
 
-        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,14">
-            <Button Content="Rescan" Style="{StaticResource ToolbarButton}" Command="{Binding RescanCommand}"/>
-            <Button Content="Remove Checked" Style="{StaticResource DangerButton}" Command="{Binding RemoveAllCheckedCommand}"/>
-            <Button Content="Save All Changes" Style="{StaticResource AccentButton}" Command="{Binding SaveCommand}"/>
-            <Button Content="Restore Backup..." Style="{StaticResource ToolbarButton}" Click="RestoreBackup_Click"/>
-            <Button Content="Export..." Style="{StaticResource ToolbarButton}" Command="{Binding ExportCommand}"
-                    ToolTip="Save the current PATH (both scopes) to a portable profile file"/>
-            <Button Content="Import..." Style="{StaticResource ToolbarButton}" Command="{Binding ImportCommand}"
-                    ToolTip="Load a PATH profile from a file; review in the Save dialog before it applies"/>
-        </StackPanel>
-
-        <!-- Summary strip -->
-        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,14" DataContext="{Binding Dashboard}">
-            <!-- Scope toggle -->
-            <Border DockPanel.Dock="Right" CornerRadius="6" ClipToBounds="True" VerticalAlignment="Center">
-                <StackPanel Orientation="Horizontal">
-                    <RadioButton Content="Combined" GroupName="Scope" Style="{StaticResource ScopeSegment}"
-                                 IsChecked="{Binding Scope, Converter={StaticResource EnumToBool}, ConverterParameter=Combined}"/>
-                    <RadioButton Content="User" GroupName="Scope" Style="{StaticResource ScopeSegment}"
-                                 IsChecked="{Binding Scope, Converter={StaticResource EnumToBool}, ConverterParameter=User}"/>
-                    <RadioButton Content="System" GroupName="Scope" Style="{StaticResource ScopeSegment}"
-                                 IsChecked="{Binding Scope, Converter={StaticResource EnumToBool}, ConverterParameter=System}"/>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <Border Width="30" Height="30" CornerRadius="6" Background="{StaticResource AccentBrush}" Margin="0,0,10,0">
+                    <TextBlock Text="E" Foreground="{StaticResource AccentForegroundBrush}"
+                               FontWeight="Bold" FontSize="15"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <StackPanel>
+                    <TextBlock Text="EnvMaid" FontFamily="Segoe UI Variable Display"
+                               FontSize="17" FontWeight="SemiBold"/>
+                    <TextBlock Text="{Binding LastScannedLabel}" Style="{StaticResource MutedText}"/>
                 </StackPanel>
-            </Border>
-
-            <StackPanel Orientation="Horizontal">
-                <Border Style="{StaticResource StatTile}">
-                    <StackPanel>
-                        <TextBlock Text="Broken" Style="{StaticResource TileLabel}"/>
-                        <TextBlock Text="{Binding BrokenCount}" Style="{StaticResource TileValue}"
-                                   Foreground="{Binding BrokenCount, Converter={StaticResource CountToBrush}, ConverterParameter=red}"/>
-                    </StackPanel>
-                </Border>
-                <Border Style="{StaticResource StatTile}">
-                    <StackPanel>
-                        <TextBlock Text="Duplicates" Style="{StaticResource TileLabel}"/>
-                        <TextBlock Text="{Binding DuplicateCount}" Style="{StaticResource TileValue}"
-                                   Foreground="{Binding DuplicateCount, Converter={StaticResource CountToBrush}, ConverterParameter=red}"/>
-                    </StackPanel>
-                </Border>
-                <Border Style="{StaticResource StatTile}" Cursor="Hand"
-                        MouseLeftButtonUp="ConflictsTile_Click">
-                    <StackPanel>
-                        <TextBlock Text="Conflicts" Style="{StaticResource TileLabel}"/>
-                        <TextBlock Text="{Binding ConflictCount}" Style="{StaticResource TileValue}"
-                                   Foreground="{Binding ConflictCount, Converter={StaticResource CountToBrush}, ConverterParameter=amber}"/>
-                    </StackPanel>
-                </Border>
-                <Border Style="{StaticResource StatTile}" MinWidth="150"
-                        Visibility="{Binding ShowLength, Converter={StaticResource BoolToVis}}">
-                    <StackPanel>
-                        <TextBlock Text="PATH length" Style="{StaticResource TileLabel}"/>
-                        <TextBlock Text="{Binding LengthLabel}" FontSize="16" FontWeight="Bold">
-                            <TextBlock.Style>
-                                <Style TargetType="TextBlock">
-                                    <Setter Property="Foreground" Value="#CDD6F4"/>
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding LengthOverLimit}" Value="True">
-                                            <Setter Property="Foreground" Value="#F38BA8"/>
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </TextBlock.Style>
-                        </TextBlock>
-                    </StackPanel>
-                </Border>
             </StackPanel>
-        </DockPanel>
 
-        <TabControl x:Name="MainTabs">
-            <TabItem Header="User PATH">
-                <views:PathPanel x:Name="UserPanel" DataContext="{Binding UserPaths}"
-                                 ConflictActivated="PathPanel_ConflictActivated"/>
+            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <Button Content="Scan again" Style="{StaticResource GhostButton}"
+                        Command="{Binding RescanCommand}" Margin="0,0,6,0"/>
+                <Button x:Name="MoreButton" Content="More" Style="{StaticResource SecondaryButton}"
+                        Click="MoreButton_Click">
+                    <Button.ContextMenu>
+                        <ContextMenu Background="{StaticResource ElevatedBrush}"
+                                     Foreground="{StaticResource TextBrush}"
+                                     BorderBrush="{StaticResource DividerBrush}">
+                            <MenuItem Header="Restore backup…" Click="RestoreBackup_Click"/>
+                            <Separator/>
+                            <MenuItem Header="Import PATH profile…"
+                                      Command="{Binding PlacementTarget.DataContext.ImportCommand,
+                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                            <MenuItem Header="Export PATH profile…"
+                                      Command="{Binding PlacementTarget.DataContext.ExportCommand,
+                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                        </ContextMenu>
+                    </Button.ContextMenu>
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <TextBlock DockPanel.Dock="Top"
+                   Text="{Binding StatusMessage}"
+                   Style="{StaticResource MutedText}"
+                   Margin="40,0,0,4"/>
+
+        <Border DockPanel.Dock="Bottom"
+                Style="{StaticResource SurfaceBorder}"
+                Padding="16,12"
+                Margin="0,14,0,0"
+                Visibility="{Binding HasStagedChanges, Converter={StaticResource BoolToVis}}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="You have unsaved changes" FontWeight="SemiBold"/>
+                    <TextBlock Text="Review the exact changes before anything is written to Windows."
+                               Style="{StaticResource MutedText}" Margin="0,2,0,0"/>
+                </StackPanel>
+                <Button Grid.Column="1"
+                        Content="Review and save"
+                        Style="{StaticResource PrimaryButton}"
+                        Command="{Binding SaveCommand}"
+                        Margin="16,0,0,0"/>
+            </Grid>
+        </Border>
+
+        <TabControl x:Name="MainTabs" Style="{StaticResource QuietTabControl}">
+            <TabControl.ItemContainerStyle>
+                <Style TargetType="TabItem" BasedOn="{StaticResource NavTab}"/>
+            </TabControl.ItemContainerStyle>
+
+            <TabItem Header="Overview">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <Grid Margin="0,34,0,0" DataContext="{Binding Dashboard}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="3*"/>
+                            <ColumnDefinition Width="2*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0" Margin="0,0,48,0">
+                            <Border Width="34" Height="4" Background="{StaticResource AccentBrush}"
+                                    CornerRadius="2" HorizontalAlignment="Left" Margin="0,0,0,18"/>
+                            <TextBlock Text="{Binding HealthTitle}" Style="{StaticResource PageTitle}"/>
+                            <TextBlock Text="{Binding HealthSummary}"
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       FontSize="14"
+                                       TextWrapping="Wrap"
+                                       Margin="0,8,0,0"/>
+                            <Button Content="Review items"
+                                    Style="{StaticResource PrimaryButton}"
+                                    HorizontalAlignment="Left"
+                                    Margin="0,22,0,0"
+                                    Click="ReviewItems_Click"
+                                    Visibility="{Binding HasAttention, Converter={StaticResource BoolToVis}}"/>
+                            <TextBlock Text="No action is needed."
+                                       Style="{StaticResource MutedText}"
+                                       Margin="0,20,0,0"
+                                       Visibility="{Binding HasAttention, Converter={StaticResource InverseBoolToVis}}"/>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1">
+                            <TextBlock Text="Needs attention" Style="{StaticResource SectionTitle}" Margin="0,0,0,8"/>
+
+                            <Border>
+                                <Border.Style>
+                                    <Style TargetType="Border" BasedOn="{StaticResource IssueRow}">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding BrokenCount}" Value="0">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="Missing locations" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{Binding BrokenCount, StringFormat={}{0} entries can be safely reviewed}"
+                                                   Style="{StaticResource MutedText}" Margin="0,3,0,0"/>
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Content="Review" Style="{StaticResource GhostButton}"
+                                            Click="ReviewBroken_Click"/>
+                                </Grid>
+                            </Border>
+
+                            <Border>
+                                <Border.Style>
+                                    <Style TargetType="Border" BasedOn="{StaticResource IssueRow}">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding DuplicateCount}" Value="0">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="Duplicate entries" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{Binding DuplicateCount, StringFormat={}{0} repeated locations detected}"
+                                                   Style="{StaticResource MutedText}" Margin="0,3,0,0"/>
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Content="Review" Style="{StaticResource GhostButton}"
+                                            Click="ReviewDuplicates_Click"/>
+                                </Grid>
+                            </Border>
+
+                            <Border>
+                                <Border.Style>
+                                    <Style TargetType="Border" BasedOn="{StaticResource IssueRow}">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding ConflictCount}" Value="0">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="Command priority" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{Binding ConflictCount, StringFormat={}{0} commands have other available copies}"
+                                                   Style="{StaticResource MutedText}" Margin="0,3,0,0"/>
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Content="Review" Style="{StaticResource GhostButton}"
+                                            Click="ReviewConflicts_Click"/>
+                                </Grid>
+                            </Border>
+
+                            <TextBlock Text="Nothing needs attention."
+                                       Style="{StaticResource MutedText}"
+                                       Margin="0,12,0,0"
+                                       Visibility="{Binding HasAttention, Converter={StaticResource InverseBoolToVis}}"/>
+                        </StackPanel>
+                    </Grid>
+                </ScrollViewer>
             </TabItem>
-            <TabItem Header="System PATH 🛡 (admin required)">
-                <views:PathPanel x:Name="SystemPanel" DataContext="{Binding SystemPaths}"
-                                 ConflictActivated="PathPanel_ConflictActivated"/>
-            </TabItem>
-            <TabItem Header="Conflicts">
-                <views:ConflictsView DataContext="{Binding Conflicts}"/>
+
+            <TabItem Header="PATH editor">
+                <Grid Margin="0,18,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <StackPanel>
+                        <TextBlock Text="PATH editor" Style="{StaticResource PageTitle}"/>
+                        <TextBlock Text="View, reorder, and edit every location. Windows searches System PATH before User PATH."
+                                   Style="{StaticResource MutedText}" Margin="0,5,0,0"/>
+                    </StackPanel>
+
+                    <TabControl x:Name="EditorTabs" Grid.Row="1" Style="{StaticResource QuietTabControl}" Margin="0,12,0,0">
+                        <TabControl.ItemContainerStyle>
+                            <Style TargetType="TabItem" BasedOn="{StaticResource NavTab}"/>
+                        </TabControl.ItemContainerStyle>
+                        <TabItem Header="User">
+                            <views:PathPanel x:Name="UserPanel"
+                                             DataContext="{Binding UserPaths}"
+                                             ConflictActivated="PathPanel_ConflictActivated"/>
+                        </TabItem>
+                        <TabItem Header="System · administrator approval on save">
+                            <views:PathPanel x:Name="SystemPanel"
+                                             DataContext="{Binding SystemPaths}"
+                                             ConflictActivated="PathPanel_ConflictActivated"/>
+                        </TabItem>
+                        <TabItem Header="Command priority">
+                            <views:ConflictsView DataContext="{Binding Conflicts}"/>
+                        </TabItem>
+                    </TabControl>
+                </Grid>
             </TabItem>
         </TabControl>
     </DockPanel>
