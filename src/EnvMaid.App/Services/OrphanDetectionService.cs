@@ -41,7 +41,7 @@ public class OrphanDetectionService
 
             var normalizedFolder = Normalize(entry.Path);
 
-            var shadowedFrom = new List<string>();
+            entry.ShadowConflicts.Clear();
             foreach (var file in Directory.EnumerateFiles(expanded))
             {
                 if (!ShadowCheckExtensions.Contains(Path.GetExtension(file)))
@@ -51,8 +51,8 @@ public class OrphanDetectionService
                 if (seenExeNames.TryGetValue(name, out var first))
                 {
                     if (!string.Equals(first.Normalized, normalizedFolder, StringComparison.OrdinalIgnoreCase)
-                        && !shadowedFrom.Contains(first.Display))
-                        shadowedFrom.Add(first.Display);
+                        && !entry.ShadowConflicts.Any(c => c.ExeName == name))
+                        entry.ShadowConflicts.Add(new ShadowConflict(name, first.Display));
                 }
                 else
                 {
@@ -60,13 +60,8 @@ public class OrphanDetectionService
                 }
             }
 
-            if (shadowedFrom.Count == 0)
+            if (entry.ShadowConflicts.Count == 0)
                 continue;
-
-            var shadowReason = $"Shadowed by {string.Join(", ", shadowedFrom)}";
-            entry.Reason = string.IsNullOrEmpty(entry.Reason)
-                ? shadowReason
-                : $"{entry.Reason}; {shadowReason}";
 
             if (entry.Confidence == FlagConfidence.None)
                 entry.Confidence = FlagConfidence.Low;
