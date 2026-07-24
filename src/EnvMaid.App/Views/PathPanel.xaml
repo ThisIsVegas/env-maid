@@ -9,6 +9,7 @@
         <conv:LengthToWidthConverter x:Key="LengthToWidth"/>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
         <conv:PathExistsConverter x:Key="PathExists"/>
+        <conv:InverseBooleanToVisibilityConverter x:Key="InverseBoolToVisibility"/>
 
         <Style x:Key="SmallButton" TargetType="Button">
             <Setter Property="Background" Value="#313244"/>
@@ -60,8 +61,20 @@
             <Setter Property="Padding" Value="4"/>
             <Setter Property="BorderThickness" Value="0,0,0,1"/>
             <Setter Property="BorderBrush" Value="#313244"/>
-            <Setter Property="DetailsVisibility" Value="{Binding IsExpanded, Converter={StaticResource BoolToVisibility}}"/>
             <Style.Triggers>
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding IsExpanded}" Value="False"/>
+                        <Condition Binding="{Binding IsLengthLimitBoundary}" Value="False"/>
+                    </MultiDataTrigger.Conditions>
+                    <Setter Property="DetailsVisibility" Value="Collapsed"/>
+                </MultiDataTrigger>
+                <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                    <Setter Property="DetailsVisibility" Value="Visible"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsLengthLimitBoundary}" Value="True">
+                    <Setter Property="DetailsVisibility" Value="Visible"/>
+                </DataTrigger>
                 <Trigger Property="IsSelected" Value="True">
                     <Setter Property="Background" Value="#45475A"/>
                 </Trigger>
@@ -97,49 +110,63 @@
             </DataGrid.Resources>
             <DataGrid.RowDetailsTemplate>
                 <DataTemplate>
-                    <ItemsControl ItemsSource="{Binding ShadowConflicts}" Margin="34,4,4,4">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Border Background="#11181825" Padding="6,3" Margin="0,0,0,2"
-                                        Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=DataGrid}}">
-                                    <Border.ContextMenu>
-                                        <ContextMenu>
-                                            <MenuItem Header="Open shadowing folder in Explorer"
-                                                      Command="{Binding PlacementTarget.Tag.OpenShadowFolderCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                                      CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-                                            <MenuItem Header="Copy exe name"
-                                                      Command="{Binding PlacementTarget.Tag.CopyExeNameCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                                      CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-                                            <MenuItem Header="Copy winning folder path"
-                                                      Command="{Binding PlacementTarget.Tag.CopyShadowedFolderPathCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                                      CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-                                            <Separator/>
-                                            <MenuItem Header="{Binding PlacementTarget.DataContext.ExeName, RelativeSource={RelativeSource AncestorType=ContextMenu}, StringFormat='Search: multiple {0} versions'}"
-                                                      Command="{Binding PlacementTarget.Tag.SearchMultipleVersionsCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                                      CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-                                        </ContextMenu>
-                                    </Border.ContextMenu>
-                                    <TextBlock Foreground="#CDD6F4" FontSize="12">
-                                        <Run Text="{Binding ExeName, Mode=OneWay}" FontWeight="SemiBold"/>
-                                        <Run Text=" — shadowed by "/>
-                                        <Run Text="{Binding ShadowedFolderPath, Mode=OneWay}"/>
-                                    </TextBlock>
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+                    <StackPanel Margin="34,6,4,6">
+                        <Border Background="#3A2C22" CornerRadius="3" Padding="8,6" Margin="0,0,0,6"
+                                Visibility="{Binding IsLengthLimitBoundary, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock Foreground="#FAB387" FontSize="12" TextWrapping="Wrap">
+                                <Run Text="⚠ 2047-character PATH limit reached here." FontWeight="SemiBold"/>
+                                <LineBreak/>
+                                <Run Text="Entries below may not load in some tools/applications." Foreground="#CDD6F4"/>
+                            </TextBlock>
+                        </Border>
+                        <TextBlock Text="Executables shadowed by an earlier PATH folder:"
+                                   Foreground="#A6ADC8" FontSize="11" Margin="0,0,0,4"
+                                   Visibility="{Binding HasShadowConflicts, Converter={StaticResource BoolToVisibility}}"/>
+                        <ItemsControl ItemsSource="{Binding ShadowConflicts}"
+                                      Visibility="{Binding HasShadowConflicts, Converter={StaticResource BoolToVisibility}}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Background="#1E1E2E" CornerRadius="3" Padding="8,5" Margin="0,0,0,3"
+                                            Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=DataGrid}}">
+                                        <Border.ContextMenu>
+                                            <ContextMenu>
+                                                <MenuItem Header="Open shadowing folder in Explorer"
+                                                          Command="{Binding PlacementTarget.Tag.OpenShadowFolderCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                          CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                                <MenuItem Header="Copy exe name"
+                                                          Command="{Binding PlacementTarget.Tag.CopyExeNameCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                          CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                                <MenuItem Header="Copy winning folder path"
+                                                          Command="{Binding PlacementTarget.Tag.CopyShadowedFolderPathCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                          CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                                <Separator/>
+                                                <MenuItem Header="{Binding PlacementTarget.DataContext.ExeName, RelativeSource={RelativeSource AncestorType=ContextMenu}, StringFormat='Search: multiple {0} versions'}"
+                                                          Command="{Binding PlacementTarget.Tag.SearchMultipleVersionsCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                          CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                            </ContextMenu>
+                                        </Border.ContextMenu>
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding ExeName, Mode=OneWay}" Foreground="#FAB387"
+                                                       FontWeight="SemiBold" FontSize="12" Width="120"/>
+                                            <TextBlock Foreground="#6C7086" FontSize="12" Text="wins from:" Margin="0,0,6,0"/>
+                                            <TextBlock Text="{Binding ShadowedFolderPath, Mode=OneWay}" Foreground="#CDD6F4" FontSize="12"/>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
                 </DataTemplate>
             </DataGrid.RowDetailsTemplate>
-            <DataGrid.RowStyle>
-                <Style TargetType="DataGridRow" BasedOn="{StaticResource {x:Type DataGridRow}}">
-                    <Style.Triggers>
-                        <DataTrigger Binding="{Binding IsExpanded}" Value="True">
-                            <Setter Property="DetailsVisibility" Value="Visible"/>
-                        </DataTrigger>
-                    </Style.Triggers>
-                </Style>
-            </DataGrid.RowStyle>
             <DataGrid.Columns>
+                <DataGridTextColumn Header="Rank" Binding="{Binding GlobalRank}" Width="50" IsReadOnly="True">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Foreground" Value="#6C7086"/>
+                            <Setter Property="HorizontalAlignment" Value="Center"/>
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
                 <DataGridTemplateColumn Header="✓" Width="34">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
@@ -147,17 +174,48 @@
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
-                <DataGridTemplateColumn Header="⚠" Width="40">
+                <DataGridTemplateColumn Header="Conflicts" Width="90">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
-                            <ToggleButton IsChecked="{Binding IsExpanded}"
-                                          Visibility="{Binding HasShadowConflicts, Converter={StaticResource BoolToVisibility}}"
-                                          Content="{Binding ShadowConflicts.Count, StringFormat='⚠ {0}'}"
-                                          Background="Transparent" BorderThickness="0" Foreground="#FAB387" Cursor="Hand"/>
+                            <Grid>
+                                <ToggleButton IsChecked="{Binding IsExpanded}"
+                                              Visibility="{Binding HasShadowConflicts, Converter={StaticResource BoolToVisibility}}"
+                                              Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                              HorizontalAlignment="Left" Padding="2">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="&#9656;" Foreground="#FAB387" FontSize="11" Margin="0,0,4,0"/>
+                                        <TextBlock Foreground="#FAB387" FontSize="12" FontWeight="SemiBold">
+                                            <Run Text="{Binding ShadowConflicts.Count, Mode=OneWay}"/>
+                                            <Run Text=" shadowed"/>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </ToggleButton>
+                                <TextBlock Text="—" Foreground="#45475A" FontSize="12"
+                                           Visibility="{Binding HasShadowConflicts, Converter={StaticResource InverseBoolToVisibility}}"/>
+                            </Grid>
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
-                <DataGridTextColumn Header="Path" Binding="{Binding Path}" Width="580" IsReadOnly="True"/>
+                <DataGridTemplateColumn Header="Path" Width="530">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Path}">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="#CDD6F4"/>
+                                        <Setter Property="ToolTip" Value="{Binding Path}"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsPastLengthLimit}" Value="True">
+                                                <Setter Property="Foreground" Value="#5C6270"/>
+                                                <Setter Property="ToolTip" Value="Past the 2047-character PATH limit — may not load in some tools/applications."/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
                 <DataGridTextColumn Header="Reason" Binding="{Binding Reason}" Width="270" IsReadOnly="True"/>
             </DataGrid.Columns>
             <DataGrid.ContextMenu>
