@@ -18,7 +18,8 @@ public partial class App : Application
         }
 
         var envService = new EnvironmentPathService();
-        var orphanService = new OrphanDetectionService();
+        var cliToolListService = new CliToolListService();
+        var orphanService = new OrphanDetectionService(cliToolListService);
         var backupService = new BackupService();
         var mainViewModel = new MainViewModel(envService, orphanService, backupService);
 

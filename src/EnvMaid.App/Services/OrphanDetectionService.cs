@@ -15,6 +15,26 @@ public class OrphanDetectionService
         ".exe", ".bat", ".cmd"
     };
 
+    // Installer/uninstaller name patterns that make a shadow almost certainly noise.
+    // Matched case-insensitively against the exe name without extension.
+    private static readonly string[] DenylistPrefixes =
+    {
+        "unins", "setup", "install", "uninstall", "update", "updater",
+        "vcredist", "vc_redist", "dotnetfx", "wix", "msiexec"
+    };
+
+    private static readonly string[] DenylistContains =
+    {
+        "redist", "setup", "installer"
+    };
+
+    private readonly CliToolListService _cliTools;
+
+    public OrphanDetectionService(CliToolListService cliTools)
+    {
+        _cliTools = cliTools;
+    }
+
     public void ApplyFlags(IReadOnlyList<PathEntry> userEntries, IReadOnlyList<PathEntry> systemEntries)
     {
         var allEntries = userEntries.Concat(systemEntries).ToList();
@@ -29,9 +49,10 @@ public class OrphanDetectionService
         ApplyShadowFlags(systemEntries.Concat(userEntries).ToList());
     }
 
-    private static void ApplyShadowFlags(IReadOnlyList<PathEntry> resolutionOrderEntries)
+    private void ApplyShadowFlags(IReadOnlyList<PathEntry> resolutionOrderEntries)
     {
-        var seenExeNames = new Dictionary<string, (string Normalized, string Display)>(StringComparer.OrdinalIgnoreCase);
+        // exe name -> the winning (first-seen) folder + full file path of the winner.
+        var seenExeNames = new Dictionary<string, (string Normalized, string Display, string WinnerFile)>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var entry in resolutionOrderEntries)
         {
@@ -52,11 +73,14 @@ public class OrphanDetectionService
                 {
                     if (!string.Equals(first.Normalized, normalizedFolder, StringComparison.OrdinalIgnoreCase)
                         && !entry.ShadowConflicts.Any(c => c.ExeName == name))
-                        entry.ShadowConflicts.Add(new ShadowConflict(name, first.Display));
+                    {
+                        var confidence = RankConflict(name, first.WinnerFile, file);
+                        entry.ShadowConflicts.Add(new ShadowConflict(name, first.Display, confidence));
+                    }
                 }
                 else
                 {
-                    seenExeNames[name] = (normalizedFolder, expanded);
+                    seenExeNames[name] = (normalizedFolder, expanded, file);
                 }
             }
 
@@ -65,6 +89,41 @@ public class OrphanDetectionService
 
             if (entry.Confidence == FlagConfidence.None)
                 entry.Confidence = FlagConfidence.Low;
+        }
+    }
+
+    /// <summary>
+    /// Bands a shadow conflict. First match wins:
+    /// denylist name or byte-identical files -> false positive;
+    /// known CLI tool -> likely real; otherwise -> possibly.
+    /// </summary>
+    private ConflictConfidence RankConflict(string exeName, string winnerFile, string loserFile)
+    {
+        if (IsDenylisted(exeName) || SameFileSize(winnerFile, loserFile))
+            return ConflictConfidence.LikelyFalsePositive;
+
+        if (_cliTools.IsKnownCliTool(exeName))
+            return ConflictConfidence.LikelyReal;
+
+        return ConflictConfidence.Possibly;
+    }
+
+    private static bool IsDenylisted(string exeName)
+    {
+        var stem = Path.GetFileNameWithoutExtension(exeName);
+        return DenylistPrefixes.Any(p => stem.StartsWith(p, StringComparison.OrdinalIgnoreCase))
+            || DenylistContains.Any(c => stem.Contains(c, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool SameFileSize(string a, string b)
+    {
+        try
+        {
+            return new FileInfo(a).Length == new FileInfo(b).Length;
+        }
+        catch (IOException)
+        {
+            return false;
         }
     }
 
