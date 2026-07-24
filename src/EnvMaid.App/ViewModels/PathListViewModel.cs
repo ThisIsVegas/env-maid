@@ -1,8 +1,12 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
+using System.IO;
+using System.Windows;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using EnvMaid.App.Models;
+using EnvMaid.App.Services;
 
 namespace EnvMaid.App.ViewModels;
 
@@ -100,6 +104,62 @@ public partial class PathListViewModel : ObservableObject
         var newIndex = index + direction;
         if (newIndex < 0 || newIndex >= Entries.Count) return;
         Entries.Move(index, newIndex);
+    }
+
+    [RelayCommand]
+    private void OpenInExplorer(PathEntry? entry)
+    {
+        if (entry is null) return;
+        var expanded = Environment.ExpandEnvironmentVariables(entry.Path);
+        if (!Directory.Exists(expanded)) return;
+        Process.Start(new ProcessStartInfo { FileName = expanded, UseShellExecute = true });
+    }
+
+    [RelayCommand]
+    private void CopyPath(PathEntry? entry)
+    {
+        if (entry is null) return;
+        TryCopyToClipboard(entry.Path);
+    }
+
+    [RelayCommand]
+    private void OpenShadowFolder(ShadowConflict? conflict)
+    {
+        if (conflict is null || !Directory.Exists(conflict.ShadowedFolderPath)) return;
+        Process.Start(new ProcessStartInfo { FileName = conflict.ShadowedFolderPath, UseShellExecute = true });
+    }
+
+    [RelayCommand]
+    private void CopyExeName(ShadowConflict? conflict)
+    {
+        if (conflict is null) return;
+        TryCopyToClipboard(conflict.ExeName);
+    }
+
+    [RelayCommand]
+    private void CopyShadowedFolderPath(ShadowConflict? conflict)
+    {
+        if (conflict is null) return;
+        TryCopyToClipboard(conflict.ShadowedFolderPath);
+    }
+
+    [RelayCommand]
+    private void SearchMultipleVersions(ShadowConflict? conflict)
+    {
+        if (conflict is null) return;
+        var url = SearchUrlBuilder.BuildMultipleVersionsQuery(conflict.ExeName);
+        Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });
+    }
+
+    private static void TryCopyToClipboard(string text)
+    {
+        try
+        {
+            Clipboard.SetText(text);
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+        }
     }
 
     private static string? PromptForPath(string title, string initialValue)
