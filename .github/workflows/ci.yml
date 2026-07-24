@@ -2,9 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [develop, master, 'release/**', 'hotfix/**']
+    branches: [main, develop, 'release/**', 'hotfix/**']
   pull_request:
-    branches: [develop, master, 'release/**', 'hotfix/**']
+    branches: [main, develop, 'release/**', 'hotfix/**']
+  workflow_dispatch:
 
 jobs:
   build-test:
