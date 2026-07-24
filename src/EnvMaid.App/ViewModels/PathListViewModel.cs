@@ -48,7 +48,11 @@ public partial class PathListViewModel : ObservableObject
             Entries.Add(new PathEntry(p, Scope));
 
         foreach (var entry in Entries)
-            entry.PropertyChanged += (_, _) => RecalculateLength();
+            entry.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(PathEntry.Path))
+                    RecalculateLength();
+            };
 
         RecalculateLength();
     }
@@ -58,6 +62,24 @@ public partial class PathListViewModel : ObservableObject
         TotalLength = string.Join(';', Entries.Select(e => e.Path)).Length;
         LengthLabel = $"Length: {TotalLength} / {PathLimit}";
         BarColor = TotalLength >= PathLimit ? RedBrush : TotalLength >= WarningThreshold ? OrangeBrush : GreenBrush;
+
+        var cumulative = 0;
+        PathEntry? lastBeforeCutoff = null;
+        foreach (var entry in Entries)
+        {
+            entry.IsLengthLimitBoundary = false;
+
+            var wasPastLimit = cumulative > PathLimit;
+            cumulative += entry.Path.Length;
+            entry.IsPastLengthLimit = cumulative > PathLimit;
+            cumulative += 1; // separator
+
+            if (!wasPastLimit && !entry.IsPastLengthLimit)
+                lastBeforeCutoff = entry;
+        }
+
+        if (lastBeforeCutoff is not null && Entries.Any(e => e.IsPastLengthLimit))
+            lastBeforeCutoff.IsLengthLimitBoundary = true;
     }
 
     [RelayCommand]
