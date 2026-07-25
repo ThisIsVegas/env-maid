@@ -22,7 +22,38 @@
         </Style>
     </Window.Resources>
 
-    <DockPanel Margin="24,18,24,20">
+    <Window.InputBindings>
+        <KeyBinding Key="F5" Command="{Binding RescanCommand}"/>
+    </Window.InputBindings>
+
+    <DockPanel>
+        <Menu DockPanel.Dock="Top"
+              Background="{StaticResource SurfaceBrush}"
+              Foreground="{StaticResource TextBrush}"
+              BorderBrush="{StaticResource DividerBrush}"
+              BorderThickness="0,0,0,1"
+              Padding="16,2">
+            <MenuItem Header="_File">
+                <MenuItem Header="_Import PATH profile…"
+                          Command="{Binding ImportCommand}"/>
+                <MenuItem Header="_Export PATH profile…"
+                          Command="{Binding ExportCommand}"/>
+                <Separator/>
+                <MenuItem Header="E_xit" Click="Exit_Click"/>
+            </MenuItem>
+            <MenuItem Header="_Tools">
+                <MenuItem Header="_Scan again" Command="{Binding RescanCommand}" InputGestureText="F5"/>
+                <MenuItem Header="_Restore backup…" Click="RestoreBackup_Click"/>
+            </MenuItem>
+            <MenuItem Header="_Help">
+                <MenuItem Header="_Report an issue" Click="ReportIssue_Click"/>
+                <MenuItem Header="View _source code" Click="ViewSource_Click"/>
+                <Separator/>
+                <MenuItem Header="_About EnvMaid" Click="About_Click"/>
+            </MenuItem>
+        </Menu>
+
+        <DockPanel Margin="24,18,24,20">
         <Grid DockPanel.Dock="Top" Margin="0,0,0,4">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
@@ -42,27 +73,10 @@
                 </StackPanel>
             </StackPanel>
 
-            <StackPanel Grid.Column="1" Orientation="Horizontal">
-                <Button Content="Scan again" Style="{StaticResource GhostButton}"
-                        Command="{Binding RescanCommand}" Margin="0,0,6,0"/>
-                <Button x:Name="MoreButton" Content="More" Style="{StaticResource SecondaryButton}"
-                        Click="MoreButton_Click">
-                    <Button.ContextMenu>
-                        <ContextMenu Background="{StaticResource ElevatedBrush}"
-                                     Foreground="{StaticResource TextBrush}"
-                                     BorderBrush="{StaticResource DividerBrush}">
-                            <MenuItem Header="Restore backup…" Click="RestoreBackup_Click"/>
-                            <Separator/>
-                            <MenuItem Header="Import PATH profile…"
-                                      Command="{Binding PlacementTarget.DataContext.ImportCommand,
-                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-                            <MenuItem Header="Export PATH profile…"
-                                      Command="{Binding PlacementTarget.DataContext.ExportCommand,
-                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-                        </ContextMenu>
-                    </Button.ContextMenu>
-                </Button>
-            </StackPanel>
+            <Button Grid.Column="1"
+                    Content="Scan again"
+                    Style="{StaticResource GhostButton}"
+                    Command="{Binding RescanCommand}"/>
         </Grid>
 
         <TextBlock DockPanel.Dock="Top"
@@ -248,5 +262,6 @@
                 </Grid>
             </TabItem>
         </TabControl>
+        </DockPanel>
     </DockPanel>
 </Window>

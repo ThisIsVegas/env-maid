@@ -1,5 +1,5 @@
 using System.Windows;
-using System.Windows.Controls.Primitives;
+using System.Diagnostics;
 using System.Windows.Input;
 using EnvMaid.App.Models;
 using EnvMaid.App.ViewModels;
@@ -55,16 +55,6 @@ public partial class MainWindow : Window
     private void PathPanel_ConflictActivated(object? sender, EventArgs e)
     {
         OpenEditor(2);
-    }
-
-    private void MoreButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (MoreButton.ContextMenu is null)
-            return;
-
-        MoreButton.ContextMenu.PlacementTarget = MoreButton;
-        MoreButton.ContextMenu.Placement = PlacementMode.Bottom;
-        MoreButton.ContextMenu.IsOpen = true;
     }
 
     private void ReviewItems_Click(object sender, RoutedEventArgs e)
@@ -127,4 +117,22 @@ public partial class MainWindow : Window
             _viewModel.RestoreCommand.Execute(dialog.SelectedBackupName);
         }
     }
+
+
+    private void Exit_Click(object sender, RoutedEventArgs e) => Close();
+
+    private void ReportIssue_Click(object sender, RoutedEventArgs e) =>
+        OpenUrl("https://github.com/ThisIsVegas/env-maid/issues/new");
+
+    private void ViewSource_Click(object sender, RoutedEventArgs e) =>
+        OpenUrl("https://github.com/ThisIsVegas/env-maid");
+
+    private void About_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new AboutDialog { Owner = this };
+        dialog.ShowDialog();
+    }
+
+    private static void OpenUrl(string url) =>
+        Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
 }
