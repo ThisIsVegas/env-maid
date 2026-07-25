@@ -43,6 +43,12 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty]
     private bool _hasStagedChanges;
 
+    /// <summary>True when a scope's PATH could not be read because it is stored under an
+    /// unsupported registry type. Save is refused while set, so the unreadable value is
+    /// never overwritten by the (empty) working copy.</summary>
+    [ObservableProperty]
+    private bool _hasPathReadError;
+
     public MainViewModel(
         EnvironmentPathService envService,
         OrphanDetectionService orphanService,
@@ -80,11 +86,26 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void Rescan()
     {
+        // A PATH stored under an unsupported registry type cannot be read safely. Surface it
+        // and leave the scope empty rather than crashing — but note that Save is blocked too,
+        // so nothing can overwrite the value we failed to read.
+        string? unreadable = null;
+
         _isRefreshing = true;
         try
         {
-            _baselineUser = _envService.GetEntries(PathScope.User).ToList();
-            _baselineSystem = _envService.GetEntries(PathScope.System).ToList();
+            try
+            {
+                _baselineUser = _envService.GetEntries(PathScope.User).ToList();
+                _baselineSystem = _envService.GetEntries(PathScope.System).ToList();
+            }
+            catch (UnsupportedPathValueTypeException ex)
+            {
+                unreadable = ex.Message;
+                _baselineUser = Array.Empty<string>();
+                _baselineSystem = Array.Empty<string>();
+            }
+
             UserPaths.LoadEntries(_baselineUser);
             SystemPaths.LoadEntries(_baselineSystem);
 
@@ -95,9 +116,10 @@ public partial class MainViewModel : ObservableObject
             _isRefreshing = false;
         }
 
+        HasPathReadError = unreadable is not null;
         HasStagedChanges = false;
         LastScannedLabel = $"Last scanned {DateTime.Now:h:mm tt}";
-        StatusMessage = string.Empty;
+        StatusMessage = unreadable ?? string.Empty;
     }
 
     private void RefreshAnalysis()
@@ -154,8 +176,27 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void Save()
     {
-        var currentUser = _envService.GetEntries(PathScope.User);
-        var currentSystem = _envService.GetEntries(PathScope.System);
+        if (HasPathReadError)
+        {
+            StatusMessage = "Save is disabled: the stored PATH could not be read safely. " +
+                            "Repair the registry value type, then rescan.";
+            return;
+        }
+
+        IReadOnlyList<string> currentUser;
+        IReadOnlyList<string> currentSystem;
+        try
+        {
+            currentUser = _envService.GetEntries(PathScope.User);
+            currentSystem = _envService.GetEntries(PathScope.System);
+        }
+        catch (UnsupportedPathValueTypeException ex)
+        {
+            // The value changed type since the last scan. Refuse rather than overwrite.
+            HasPathReadError = true;
+            StatusMessage = ex.Message;
+            return;
+        }
 
         var stagedUser = UserPaths.Entries.Select(e => e.Path).ToList();
         var stagedSystem = SystemPaths.Entries.Select(e => e.Path).ToList();
@@ -211,9 +252,22 @@ public partial class MainViewModel : ObservableObject
         var userEntries = backup.UserPath.Length > 0 ? backup.UserPath.Split(';') : Array.Empty<string>();
         var systemEntries = backup.SystemPath.Length > 0 ? backup.SystemPath.Split(';') : Array.Empty<string>();
 
+        IReadOnlyList<string> currentSystem;
+        try
+        {
+            currentSystem = _envService.GetEntries(PathScope.System);
+        }
+        catch (UnsupportedPathValueTypeException ex)
+        {
+            // Read the System PATH *before* writing anything, so an unreadable value
+            // aborts the whole restore rather than leaving User written and System not.
+            HasPathReadError = true;
+            StatusMessage = ex.Message;
+            return;
+        }
+
         _envService.SetEntries(PathScope.User, userEntries);
 
-        var currentSystem = _envService.GetEntries(PathScope.System);
         var systemResult = ApplySystemPathIfChanged(currentSystem, systemEntries);
 
         _envService.BroadcastEnvironmentChange();

@@ -68,11 +68,33 @@ public class EnvironmentPathService
     {
         using var key = OpenEnvKey(scope, writable: false);
         // DoNotExpandEnvironmentNames keeps "%VAR%\bin" literal instead of expanding it.
-        var raw = key?.GetValue("Path", null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string;
-        if (string.IsNullOrEmpty(raw))
+        var raw = key?.GetValue("Path", null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+
+        return ParseStoredValue(raw, scope, () => key!.GetValueKind("Path"));
+    }
+
+    /// <summary>
+    /// Turns the raw object the registry handed back into PATH entries.
+    /// Split out from <see cref="GetEntries"/> so the type guard is testable without a registry.
+    /// </summary>
+    /// <param name="raw">The value as returned by <c>RegistryKey.GetValue</c>; null when absent.</param>
+    /// <param name="scope">Scope, for the error message.</param>
+    /// <param name="readKind">Reads the value's registry type. Only called for the error path.</param>
+    public static IReadOnlyList<string> ParseStoredValue(
+        object? raw, PathScope scope, Func<RegistryValueKind> readKind)
+    {
+        // A Path stored as REG_MULTI_SZ/REG_DWORD/REG_BINARY comes back as string[]/int/byte[].
+        // Casting that with "as string" yields null, which would read as an EMPTY path — and
+        // saving that back would wipe the real value. That is the destructive round-trip §4.2
+        // of the environment-variable reference calls out. Refuse rather than report empty.
+        if (raw is not null and not string)
+            throw new UnsupportedPathValueTypeException(scope, readKind());
+
+        var text = raw as string;
+        if (string.IsNullOrEmpty(text))
             return Array.Empty<string>();
 
-        return raw.Split(';');
+        return text.Split(';');
     }
 
     public void SetEntries(PathScope scope, IEnumerable<string> entries)
