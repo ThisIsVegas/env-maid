@@ -1,6 +1,6 @@
 # Windows Environment Variables — Canonical Reference & Implementation Specification
 
-**Document version:** 2.0
+**Document version:** 2.1
 **Last revised:** 2026-07-25
 **Status:** Canonical. This document is the source of truth for Windows environment-variable
 behavior in this repository. `windows-path-reference.md` is a compatibility redirect and must
@@ -187,6 +187,11 @@ variable with its intended value.
 > Microsoft does not currently republish a comprehensive modern PATH registry specification.
 > Cover this with a regression test (`EMP-05`) rather than treating the page as a live
 > contract.
+>
+> ✅ **Verified 2026-07-25** on build 10.0.19045.6466: both `HKCU\Environment\Path` and the
+> HKLM Session Manager `Path` are `REG_EXPAND_SZ`, matching the WS2003 page. One machine, one
+> build — the **[DOC-HIST]** tag and its regression-test obligation (§0.1) both stand.
+> See [Appendix A.1](#a1--emp-05-confirmed).
 
 → [Path Entry (WS2003 registry reference)](https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2003/cc737559(v=ws.10))
 
@@ -197,8 +202,12 @@ variable with its intended value.
 > **[POLICY]** `RegQueryValueExW` returns the type in `lpType`. Round-trip it unchanged
 > unless the user explicitly requests conversion (§14).
 
-- **[EMP]** `EMP-06` — `REG_MULTI_SZ` is reportedly tolerated by the environment builder for
-  some values. Never write it; the reader must degrade gracefully rather than crash.
+- **[EMP]** `EMP-06` — ❌ **refuted by test** (2026-07-25, build 10.0.19045.6466). The
+  environment builder does **not** tolerate `REG_MULTI_SZ`: it skips such values entirely.
+  A `Path` stored this way is therefore **absent from the environment**, not merely
+  misparsed — a harder failure than "tolerated" suggests. Never write it; the reader must
+  degrade gracefully rather than crash, and should treat it as an error rather than a
+  warning. See [Appendix A.2](#a2--emp-06-refuted).
 
 ### 4.3 Safe registry string handling 🟢 CURRENT
 
@@ -226,9 +235,14 @@ where marked:
 | Represent "value absent" distinctly from "value present and empty". | Required for faithful undo of deletions. |
 | Handle `ERROR_MORE_DATA` by re-querying; the buffer contents are undefined in that case. | **[DOC]** |
 
-- **[EMP]** `EMP-07` — whether Windows' own environment builder tolerates an unterminated
-  `Path` value, or truncates/ignores it. Worth testing, because it determines how alarming
-  your "malformed value" warning should be.
+- **[EMP]** `EMP-07` — ⚠️ **tested; worse than assumed** (2026-07-25, build 10.0.19045.6466).
+  Behavior depends on byte-count **parity**. On an even `cbData` the registry silently appends
+  the terminator and the value survives intact. On an **odd or zero** `cbData` the bytes are
+  stored verbatim and the environment builder **reads past the value into adjacent block
+  memory**, surfacing the contents of unrelated variables. The "malformed value" warning
+  should therefore be alarming: such a value can leak other variables' data, and what a
+  program reads back may be data it was never given.
+  See [Appendix A.3](#a3--emp-07-confirmed-with-a-worse-finding).
 
 ---
 
@@ -816,8 +830,8 @@ one-click restore that reproduces `present`, `registryType`, and `rawData` exact
 ### Registry / value handling
 | Case | Expect |
 |---|---|
-| `REG_SZ` value missing its terminating null | Read safely; flag as malformed; no buffer overrun |
-| `REG_MULTI_SZ` or other unsupported type in `Path` | Degrade gracefully; do not crash; do not silently rewrite |
+| `REG_SZ` value missing its terminating null | Read safely; flag as malformed; no buffer overrun. **Odd/zero `cbData` is the dangerous case** (`EMP-07`, A.3) — even counts are auto-terminated by the registry |
+| `REG_MULTI_SZ` or other unsupported type in `Path` | Degrade gracefully; do not crash; do not silently rewrite. Report as an **error**, not a warning: the builder skips such a value, so `Path` is absent from the environment entirely (`EMP-06`, A.2) |
 | `Path` stored as `REG_SZ` where `REG_EXPAND_SZ` is expected | Detect; offer explicit repair; never propagate silently |
 | User `Path` completely absent | Handled as "absent", not as `""` |
 | Machine `Path` completely absent | Same |
@@ -866,9 +880,9 @@ source link, or considered settled with a recorded test result.
 | EMP-02 | Environment block sort collation | Build blocks with mixed case/ordinal-adjacent names | — | — | — |
 | EMP-03 | Canonical casing is cosmetic only | Write `PATH` vs `Path`; observe registry + `set` | — | — | — |
 | EMP-04 | No escape for literal `%` in `REG_EXPAND_SZ` | Store `100%%` and `100%`; observe expansion | — | — | — |
-| EMP-05 | `Path` is `REG_EXPAND_SZ` on current Windows | Read type on clean installs | — | — | — |
-| EMP-06 | `REG_MULTI_SZ` tolerated by environment builder | Set `Path` to `REG_MULTI_SZ`, reboot, inspect | — | — | — |
-| EMP-07 | Behavior with an unterminated `Path` value | Write raw bytes without terminator; observe | — | — | — |
+| EMP-05 | `Path` is `REG_EXPAND_SZ` on current Windows | Read type on clean installs | 10.0.19045.6466 (22H2) | ✅ **Confirmed** — both scopes `REG_EXPAND_SZ`. See A.1 | 2026-07-25 |
+| EMP-06 | `REG_MULTI_SZ` tolerated by environment builder | Set `Path` to `REG_MULTI_SZ`, reboot, inspect | 10.0.19045.6466 (22H2) | ❌ **REFUTED** — builder **skips** `REG_MULTI_SZ` values entirely. See A.2 | 2026-07-25 |
+| EMP-07 | Behavior with an unterminated `Path` value | Write raw bytes without terminator; observe | 10.0.19045.6466 (22H2) | ⚠️ **Confirmed + worse** — even counts silently terminated; **odd/zero counts stored verbatim and the builder reads past them into adjacent memory**. See A.3 | 2026-07-25 |
 | EMP-08 | Expansion is single-pass; cycles terminate | `A=%B%`, `B=%A%`; call `ExpandEnvironmentStrings` | — | — | — |
 | EMP-09 | Control Panel 2,047-char cap | Attempt to edit a longer value in the GUI | — | — | — |
 | EMP-10 | ~2,048-char registry parser limit | Store a longer value; check the built block | — | — | — |
@@ -886,6 +900,88 @@ source link, or considered settled with a recorded test result.
 
 **Priority:** `EMP-17` and `EMP-19` gate correctness of the core feature (composition order
 and conflict analysis). `EMP-05`, `EMP-06`, and `EMP-07` gate data safety. Do those six first.
+
+### Recorded results
+
+All three data-safety claims were verified on **Windows 10 Pro 22H2, build 10.0.19045.6466,
+AMD64**, on 2026-07-25. Method: a throwaway .NET 10 probe writing only `EnvMaidProbe_*` value
+names into the real `HKCU\Environment` key — never the `Path` value itself. The live `Path`
+was backed up beforehand and verified byte-identical afterward. Single machine, single build:
+these results are **not** yet multi-build evidence.
+
+#### A.1 — `EMP-05` confirmed
+
+| Key | Value | Casing | Type | Length |
+|---|---|---|---|---|
+| `HKCU\Environment` | `Path` | `Path` | `REG_EXPAND_SZ` | 3,822 |
+| HKLM Session Manager | `Path` | `Path` | `REG_EXPAND_SZ` | 6,099 |
+| HKLM Session Manager | `PATHEXT` | `PATHEXT` | **`REG_SZ`** | 62 |
+
+Both `Path` values are `REG_EXPAND_SZ`, matching the **[DOC-HIST]** WS2003 page (§4.2).
+Incidental finding: `PATHEXT` is `REG_SZ`, not `REG_EXPAND_SZ` — so §11.1's "expandable when
+it contains `%…%`" rule matches the shipped reality here, since `PATHEXT` contains none.
+Neither `Path` value contained a `%VAR%` reference on this machine.
+
+#### A.2 — `EMP-06` refuted
+
+The claim as written ("`REG_MULTI_SZ` is reportedly tolerated by the environment builder for
+some values") is **false on this build**.
+
+Method note: a child `cmd.exe` **inherits** its parent's environment block and never re-reads
+the registry, so `set` in a spawned shell cannot test the builder. `CreateEnvironmentBlock`
+is the builder and was used instead.
+
+| Probe value | Registry type | In the built block? |
+|---|---|---|
+| `EnvMaidProbe_Multi` | `REG_MULTI_SZ` | ❌ **absent** |
+| `EnvMaidProbe_Expand` | `REG_EXPAND_SZ` | ✅ present, expanded |
+| `EnvMaidProbe_Sz` | `REG_SZ` | ✅ present |
+
+The two well-typed controls appearing proves the method worked. **A `REG_MULTI_SZ` variable
+is silently skipped** — not converted, not partially read, not an error.
+
+**Consequence for `Path`:** a `Path` stored as `REG_MULTI_SZ` would not be skipped *as a PATH
+entry list* — it would make `Path` **absent from the environment entirely**. That is more
+severe than "tolerated" implies, and it argues the reader should treat this as a hard error
+rather than a soft warning.
+
+#### A.3 — `EMP-07` confirmed, with a worse finding
+
+Behavior **depends on the byte count parity**, which the original claim did not anticipate.
+
+| Written | `cbData` stored | Terminated on disk? | Builder's view |
+|---|---|---|---|
+| 42 B, no terminator | **44 B** (grew by 2) | ✅ yes | `"C:\probe\unterminated"` — correct |
+| 44 B, terminated | 44 B | ✅ yes | correct |
+| 41 B, odd count | **41 B** (verbatim) | ❌ **no** | `"C:\probe\unterminate"` — truncated |
+| 0 B, empty | **0 B** (verbatim) | ❌ **no** | 🚨 `"C:\Users\thisi\OneDrive"` |
+| 1 B, `'A'` | **1 B** (verbatim) | ❌ **no** | 🚨 `"A:\Users\thisi\OneDrive"` |
+
+On **even** byte counts the registry silently appends the terminator, so the value survives.
+On **odd or zero** counts it stores the bytes verbatim, and the environment builder then
+**reads past the end of the value into adjacent block memory.**
+
+The over-read was confirmed, not inferred. The bleed-through text
+`:\Users\thisi\OneDrive` exactly matches this machine's real `OneDrive` variable; the 1-byte
+`'A'` payload overwrote precisely the first character of it, yielding `A:\Users\…`. Varying
+the payload (2, 4, 8 bytes — all even) produced clean values, isolating the behavior to
+non-even counts. Each case ran in isolation with the value deleted between runs, ruling out
+cross-contamination.
+
+This is the buffer over-read §4.3 warns about, observed in Windows' own builder. It means a
+malformed value is not merely unreadable — **it can surface the contents of unrelated
+variables**, and the value a program reads back may be data it was never given.
+
+**Consequences:**
+
+- `RegGetValueW` added the missing terminator on read in every case (§4.3's documented
+  guarantee held), so a `RegGetValueW`-based reader is insulated from the truncation but
+  cannot tell a malformed value from a well-formed one by content alone. Detecting it
+  requires comparing the raw `cbData` from `RegQueryValueExW` against the returned size, or
+  checking parity and terminator directly.
+- `RegistryKey` (managed) returned the truncated-but-safe string; it never surfaced the
+  bleed-through, and never threw.
+- A length gate that assumes `cbData / 2 == character count` is wrong for odd counts.
 
 ---
 
@@ -929,5 +1025,6 @@ and conflict analysis). `EMP-05`, `EMP-06`, and `EMP-07` gate data safety. Do th
 
 | Version | Date | Changes |
 |---|---|---|
+| 2.1 | 2026-07-25 | Verified the three data-safety empirical claims on build 10.0.19045.6466 and recorded results in Appendix A (new "Recorded results" section, A.1–A.3). **`EMP-06` refuted** — the environment builder skips `REG_MULTI_SZ` entirely, so a `Path` stored that way is absent from the environment rather than tolerated. **`EMP-07` found worse than assumed** — behavior depends on byte-count parity; odd/zero `cbData` is stored verbatim and the builder reads past it into adjacent block memory, leaking unrelated variables' values. `EMP-05` confirmed. Updated §4.2, §17, and the Appendix A table accordingly. |
 | 2.0 | 2026-07-25 | Merged the standalone PATH reference in; added evidence taxonomy (§0.1) and implementation-status labels (§0.2); added safe registry string handling (§4.3); added the PATH entry data model (§9.1), raw-vs-effective directories (§9.2), and duplicate confidence levels (§9.3); replaced the single search-order narrative with a resolver-profile matrix (§9.5) including `SearchPathW`/`SafeProcessSearchMode`; corrected App Paths to include HKCU (§9.6); added the create/update/delete contract (§11); reworked the protected-variable table by origin and scope (§12); added optimistic concurrency (§14) and the backup schema (§15); added Appendix A empirical claims backlog. |
 | 1.0 | 2026-07-25 | Initial combined reference. |
