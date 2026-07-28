@@ -3,20 +3,28 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using EnvMaid.App.Models;
-using Microsoft.Win32;
 
 namespace EnvMaid.App.Services;
 
+/// <summary>
+/// PATH semantics over <see cref="IEnvironmentVariableStore"/>: the <c>;</c> split and join,
+/// and the elevation relaunch that writing the System scope needs.
+/// </summary>
+/// <remarks>
+/// Storage — presence, registry type, the raw bytes — belongs to the store. This class never
+/// touches the registry itself, which is what makes everything above it fakeable.
+/// </remarks>
 public class EnvironmentPathService
 {
     public const string ElevatedSetSystemPathArg = "--elevated-set-system-path";
 
-    // Registry locations backing the User and System PATH. We read/write here rather
-    // than via Environment.GetEnvironmentVariable so that entries like "%JAVA_HOME%\bin"
-    // survive a round-trip: the Environment API expands %VARS% on read, which would make
-    // Save rewrite them into hardcoded literals and destroy the variable reference.
-    private const string UserEnvKey = @"Environment";
-    private const string SystemEnvKey = @"SYSTEM\CurrentControlSet\Control\Session Manager\Environment";
+    /// <summary>The registry value name backing PATH in both scopes.</summary>
+    public const string PathValueName = "Path";
+
+    private readonly IEnvironmentVariableStore _store;
+
+    public EnvironmentPathService(IEnvironmentVariableStore? store = null) =>
+        _store = store ?? new EnvironmentVariableStore();
 
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
     private static extern IntPtr SendMessageTimeout(
@@ -64,53 +72,42 @@ public class EnvironmentPathService
         }
     }
 
-    public IReadOnlyList<string> GetEntries(PathScope scope)
-    {
-        using var key = OpenEnvKey(scope, writable: false);
-        // DoNotExpandEnvironmentNames keeps "%VAR%\bin" literal instead of expanding it.
-        var raw = key?.GetValue("Path", null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+    /// <summary>Reads the stored PATH for a scope, unexpanded.</summary>
+    public IReadOnlyList<string> GetEntries(PathScope scope) =>
+        SplitEntries(_store.Read(scope, PathValueName));
 
-        return ParseStoredValue(raw, scope, () => key!.GetValueKind("Path"));
-    }
+    /// <summary>The whole stored value, so callers that care about absent-vs-empty can tell.</summary>
+    public VariableValue GetStoredValue(PathScope scope) => _store.Read(scope, PathValueName);
 
     /// <summary>
-    /// Turns the raw object the registry handed back into PATH entries.
-    /// Split out from <see cref="GetEntries"/> so the type guard is testable without a registry.
+    /// Splits a stored PATH into entries.
     /// </summary>
-    /// <param name="raw">The value as returned by <c>RegistryKey.GetValue</c>; null when absent.</param>
-    /// <param name="scope">Scope, for the error message.</param>
-    /// <param name="readKind">Reads the value's registry type. Only called for the error path.</param>
-    public static IReadOnlyList<string> ParseStoredValue(
-        object? raw, PathScope scope, Func<RegistryValueKind> readKind)
+    /// <remarks>
+    /// An absent value and an empty one both yield no entries — a PATH with nothing on it is a
+    /// PATH with nothing on it. The difference only matters on write, which is why it survives
+    /// in <see cref="VariableValue"/> rather than being resolved here.
+    /// </remarks>
+    public static IReadOnlyList<string> SplitEntries(VariableValue value)
     {
-        // A Path stored as REG_MULTI_SZ/REG_DWORD/REG_BINARY comes back as string[]/int/byte[].
-        // Casting that with "as string" yields null, which would read as an EMPTY path — and
-        // saving that back would wipe the real value. That is the destructive round-trip §4.2
-        // of the environment-variable reference calls out. Refuse rather than report empty.
-        if (raw is not null and not string)
-            throw new UnsupportedPathValueTypeException(scope, readKind());
-
-        var text = raw as string;
-        if (string.IsNullOrEmpty(text))
+        if (!value.Present || value.RawData.Length == 0)
             return Array.Empty<string>();
 
-        return text.Split(';');
+        return value.RawData.Split(';');
     }
 
     public void SetEntries(PathScope scope, IEnumerable<string> entries)
     {
-        var joined = string.Join(';', entries);
-        using var key = OpenEnvKey(scope, writable: true)
-            ?? throw new InvalidOperationException($"Could not open the {scope} environment registry key for writing.");
-        // ExpandString (REG_EXPAND_SZ) is the type Windows expects for PATH, so any
-        // %VAR% references we preserved on read stay expandable at use time.
-        key.SetValue("Path", joined, RegistryValueKind.ExpandString);
-    }
+        // Empty entries are tolerated on read but dropped on write: a stray ";;" resolves to the
+        // current directory for some consumers, which is never what an editor should persist.
+        var joined = string.Join(';', entries.Where(e => !string.IsNullOrWhiteSpace(e)));
 
-    private static RegistryKey? OpenEnvKey(PathScope scope, bool writable) =>
-        scope == PathScope.User
-            ? Registry.CurrentUser.OpenSubKey(UserEnvKey, writable)
-            : Registry.LocalMachine.OpenSubKey(SystemEnvKey, writable);
+        var existing = _store.Read(scope, PathValueName);
+        var type = existing.Present
+            ? existing.Type
+            : EnvironmentVariableStore.TypeForNewValue(PathValueName, joined);
+
+        _store.Write(scope, PathValueName, VariableValue.Of(type, joined));
+    }
 
     public void BroadcastEnvironmentChange()
     {
