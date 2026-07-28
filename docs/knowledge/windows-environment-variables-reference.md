@@ -1,6 +1,6 @@
 # Windows Environment Variables — Canonical Reference & Implementation Specification
 
-**Document version:** 2.1
+**Document version:** 2.2
 **Last revised:** 2026-07-25
 **Status:** Canonical. This document is the source of truth for Windows environment-variable
 behavior in this repository. `windows-path-reference.md` is a compatibility redirect and must
@@ -278,9 +278,11 @@ unsupported:
 
 ### 5.3 Nesting
 
-- **[EMP]** `EMP-08` — whether expansion is single-pass (so `%A%` where `A` contains `%B%`
-  does not recursively resolve). Strongly expected, but test it, and test self-reference
-  (`A=%A%`) and cycles (`A=%B%`, `B=%A%`) for non-termination.
+- **[EMP]** `EMP-08` — ✅ **confirmed by test** (2026-07-25, build 10.0.19045.6466).
+  Expansion **is single-pass**: `%A%` where `A` contains `%B%` yields `%B%`, not `B`'s value.
+  Self-reference (`A=%A%`) and cycles (`A=%B%`, `B=%A%`) both terminate immediately — a
+  resolver needs no depth limit or visited-set guard.
+  See [Appendix A.4](#a4--emp-08-confirmed-expansion-is-single-pass).
 
 ### 5.4 Expanding for another user 🟡 PLANNED
 
@@ -883,7 +885,7 @@ source link, or considered settled with a recorded test result.
 | EMP-05 | `Path` is `REG_EXPAND_SZ` on current Windows | Read type on clean installs | 10.0.19045.6466 (22H2) | ✅ **Confirmed** — both scopes `REG_EXPAND_SZ`. See A.1 | 2026-07-25 |
 | EMP-06 | `REG_MULTI_SZ` tolerated by environment builder | Set `Path` to `REG_MULTI_SZ`, reboot, inspect | 10.0.19045.6466 (22H2) | ❌ **REFUTED** — builder **skips** `REG_MULTI_SZ` values entirely. See A.2 | 2026-07-25 |
 | EMP-07 | Behavior with an unterminated `Path` value | Write raw bytes without terminator; observe | 10.0.19045.6466 (22H2) | ⚠️ **Confirmed + worse** — even counts silently terminated; **odd/zero counts stored verbatim and the builder reads past them into adjacent memory**. See A.3 | 2026-07-25 |
-| EMP-08 | Expansion is single-pass; cycles terminate | `A=%B%`, `B=%A%`; call `ExpandEnvironmentStrings` | — | — | — |
+| EMP-08 | Expansion is single-pass; cycles terminate | `A=%B%`, `B=%A%`; call `ExpandEnvironmentStrings` | 10.0.19045.6466 (22H2) | ✅ **Confirmed** — single-pass; self-reference and cycles terminate immediately, no guard needed. See A.4 | 2026-07-25 |
 | EMP-09 | Control Panel 2,047-char cap | Attempt to edit a longer value in the GUI | — | — | — |
 | EMP-10 | ~2,048-char registry parser limit | Store a longer value; check the built block | — | — | — |
 | EMP-11 | Quoted PATH entries are tolerated | Add `"C:\dir with space"`; run an exe from it | — | — | — |
@@ -985,6 +987,35 @@ variables**, and the value a program reads back may be data it was never given.
 
 ---
 
+#### A.4 — `EMP-08` confirmed (expansion is single-pass)
+
+Verified 2026-07-25 on build 10.0.19045.6466 via `Environment.ExpandEnvironmentVariables`
+(process-scope variables only). Probe: [`docs/prototypes/ExpansionProbe.cs`](../prototypes/ExpansionProbe.cs).
+
+| Setup | Result |
+|---|---|
+| `INNER=C:\inner`, `OUTER=%INNER%` → expand `%OUTER%` | `%INNER%` — **not** `C:\inner` |
+| `A1→B2→C3→D4` chain → expand `%A1%` | `%B2%` — one substitution only |
+| Self-reference `SELFREF=%SELFREF%` | `%SELFREF%`, returns in 0 ms |
+| Cycle `CYCA=%CYCB%`, `CYCB=%CYCA%` | `%CYCB%`, returns in 0 ms |
+
+**Expansion is single-pass.** Cycles and self-references cannot hang it, so a resolver does
+not need a depth limit or a visited-set guard. Case-insensitivity of lookup also confirmed
+(`%real%`, `%REAL%`, `%ReAl%` all resolved), matching §5.1 **[DOC]**.
+
+**Detection consequence.** Because expansion is single-pass, a surviving `%…%` in the output
+is the signal for "unresolved" — but the naive "two `%` characters survive" test
+false-positives. Observed counter-examples: `C:\100%%`, `C:\a%%b`, and a **real directory on
+the test machine**, `C:\Users\<user>\%HOMEDRIVE%%HOMEPATH%`, created by a tool that wrote
+unexpanded text. The reliable rule requires the interior of a `%…%` pair to be non-empty and
+free of path separators (`\`, `/`, `:`), so that it reads as a variable *name*. That scores
+11/11 on the probe's case table where the naive rule misses 4.
+
+Related: `EMP-04` (no documented escape for a literal `%`) remains unverified, and is why this
+is a heuristic rather than a parse.
+
+---
+
 ## Appendix B — Source index
 
 | Topic | URL |
@@ -1025,6 +1056,7 @@ variables**, and the value a program reads back may be data it was never given.
 
 | Version | Date | Changes |
 |---|---|---|
+| 2.2 | 2026-07-25 | Verified `EMP-08` (expansion is single-pass; cycles terminate) and recorded it as Appendix A.4, with the unresolved-`%VAR%` detection rule the probe established — the naive "two `%` survive" test false-positives on `%%`-doubling and on real directories containing percent signs. Updated §5.3. |
 | 2.1 | 2026-07-25 | Verified the three data-safety empirical claims on build 10.0.19045.6466 and recorded results in Appendix A (new "Recorded results" section, A.1–A.3). **`EMP-06` refuted** — the environment builder skips `REG_MULTI_SZ` entirely, so a `Path` stored that way is absent from the environment rather than tolerated. **`EMP-07` found worse than assumed** — behavior depends on byte-count parity; odd/zero `cbData` is stored verbatim and the builder reads past it into adjacent block memory, leaking unrelated variables' values. `EMP-05` confirmed. Updated §4.2, §17, and the Appendix A table accordingly. |
 | 2.0 | 2026-07-25 | Merged the standalone PATH reference in; added evidence taxonomy (§0.1) and implementation-status labels (§0.2); added safe registry string handling (§4.3); added the PATH entry data model (§9.1), raw-vs-effective directories (§9.2), and duplicate confidence levels (§9.3); replaced the single search-order narrative with a resolver-profile matrix (§9.5) including `SearchPathW`/`SafeProcessSearchMode`; corrected App Paths to include HKCU (§9.6); added the create/update/delete contract (§11); reworked the protected-variable table by origin and scope (§12); added optimistic concurrency (§14) and the backup schema (§15); added Appendix A empirical claims backlog. |
 | 1.0 | 2026-07-25 | Initial combined reference. |
