@@ -1,6 +1,6 @@
 # Windows Environment Variables — Canonical Reference & Implementation Specification
 
-**Document version:** 2.2
+**Document version:** 2.3
 **Last revised:** 2026-07-25
 **Status:** Canonical. This document is the source of truth for Windows environment-variable
 behavior in this repository. `windows-path-reference.md` is a compatibility redirect and must
@@ -458,9 +458,13 @@ Operation contract — all **[POLICY]**:
 > variable reference may expand into text containing semicolons — e.g. `%TOOLCHAIN%` where
 > `TOOLCHAIN=C:\a;C:\b`. One token then contributes two effective directories.
 
-- **[EMP]** `EMP-15` — that the environment builder splits post-expansion (so `%TOOLCHAIN%`
-  really does yield two search directories rather than one malformed one). This must be
-  tested; it determines whether the case is "supported" or "structurally ambiguous."
+- **[EMP]** `EMP-15` — ✅ **confirmed by test** (2026-07-25, build 10.0.19045.6466).
+  `%TOOLCHAIN%` really does yield **two search directories**, so the case is *supported* by
+  Windows rather than malformed. The mechanism matters: expansion happens **when the
+  environment block is built**, and consumers split the already-expanded value. Nothing
+  re-expands `PATH` at lookup time — a `PATH` still containing the literal text
+  `%TOOLCHAIN%` resolves to **nothing**.
+  See [Appendix A.5](#a5--emp-15-confirmed-post-expansion-splitting).
 
 **[POLICY]** The model must:
 
@@ -603,6 +607,21 @@ global value.
 - The application manifest declares `longPathAware`
 
 → [Maximum Path Length Limitation](https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation)
+
+> **[EMP]** `EMP-22` — observed 2026-07-25 on build 10.0.19045.6466: a .NET 10 process
+> **without** `longPathAware` in its manifest successfully created, tested, and enumerated a
+> **307-character** directory path on a machine with `LongPathsEnabled = 1`. The documented
+> "both conditions" rule did not hold for this process.
+>
+> The likely explanation is that modern .NET opts into long paths independently of the
+> application manifest, so the manifest requirement binds native Win32 callers rather than the
+> BCL. **Not verified**, and it does not generalise: raw P/Invoke to `CreateFileW` from the
+> same process may still be capped, and other machines may have `LongPathsEnabled = 0`.
+>
+> **[POLICY]** Do not rely on it. Flag entries over `MAX_PATH`, report the machine's
+> `LongPathsEnabled` state alongside, and use the `\\?\` prefix for EnvMaid's own I/O where a
+> long path is possible — it bypasses the limit regardless of manifest or registry state
+> (also confirmed in the same run).
 
 ---
 
@@ -892,13 +911,14 @@ source link, or considered settled with a recorded test result.
 | EMP-12 | UNC and relative entries resolve | Add `\\server\share` and `.\bin`; test resolution | — | — | — |
 | EMP-13 | Trailing `\` is insignificant | `C:\dir` vs `C:\dir\`; both resolve | — | — | — |
 | EMP-14 | Empty entries are ignored (not CWD) | `PATH=C:\a;;C:\b` with an exe in CWD | — | — | — |
-| EMP-15 | Post-expansion `;` splitting | `TOOLCHAIN=C:\a;C:\b`, `PATH=%TOOLCHAIN%`; run exes from both | — | — | — |
+| EMP-15 | Post-expansion `;` splitting | `TOOLCHAIN=C:\a;C:\b`, `PATH=%TOOLCHAIN%`; run exes from both | 10.0.19045.6466 (22H2) | ✅ **Confirmed** — builder expands, consumers split; one token yields N directories. Nothing re-expands at lookup. See A.5 | 2026-07-25 |
 | EMP-16 | Cost of duplicate entries | Measure resolution latency vs entry count | — | — | — |
 | EMP-17 | **Machine entries precede User entries** | Distinct marker dirs in each scope; check merged order | — | — | — |
 | EMP-18 | `PATHEXT` order beats the `path` doc's claim | Same-named `.com` and `.exe` in one dir | — | — | — |
 | EMP-19 | **Directory-major PATHEXT interleaving** | `a.bat` in dir1, `a.exe` in dir2; run `a` | — | — | — |
 | EMP-20 | `INCLUDE`/`LIB`/`PSModulePath` list semantics | Per-consumer behavior check | — | — | — |
 | EMP-21 | Origin classification in §12 table | Three-way registry vs process-block diff | — | — | — |
+| EMP-22 | .NET long-path I/O works without `longPathAware` when `LongPathsEnabled=1` | Create/enumerate a >260-char path from an unmanifested process | 10.0.19045.6466 (22H2) | ⚠️ **Observed** — 307-char path worked; contradicts the documented "both conditions" rule. Do not rely on it (§9.7) | 2026-07-25 |
 
 **Priority:** `EMP-17` and `EMP-19` gate correctness of the core feature (composition order
 and conflict analysis). `EMP-05`, `EMP-06`, and `EMP-07` gate data safety. Do those six first.
@@ -1016,6 +1036,35 @@ is a heuristic rather than a parse.
 
 ---
 
+#### A.5 — `EMP-15` confirmed (post-expansion splitting)
+
+Verified 2026-07-25 on build 10.0.19045.6466. Probe:
+[`docs/prototypes/AmbiguityLongPathProbe.cs`](../prototypes/AmbiguityLongPathProbe.cs).
+
+With `TOOLCHAIN=<a>;<b>` and marker commands in each directory:
+
+| `PATH` contents | `markerA` | `markerB` |
+|---|---|---|
+| `<System32>;<a>;<b>` (expanded) | ✅ `FROM_A` | ✅ `FROM_B` |
+| `<System32>;%TOOLCHAIN%` (literal token) | ❌ not found | ❌ not found |
+| `SearchPathW(lpPath = "<a>;<b>")` | ✅ resolves | — |
+| `SearchPathW(lpPath = "%TOOLCHAIN%")` | ❌ `ERROR_FILE_NOT_FOUND` (2) | — |
+
+**Both halves matter.** One token *does* contribute N effective directories — but only
+because the **environment builder expands the value when constructing the block**, after
+which ordinary consumers split on `;`. There is no re-expansion at lookup time.
+
+Consequences:
+
+- A `REG_EXPAND_SZ` `PATH` containing `%TOOLCHAIN%` is legitimate and works.
+- A `PATH` that still contains literal `%…%` text at the point of use resolves to nothing —
+  which is why an unresolved variable (§5.1, `EMP-08`) is a genuine defect, not cosmetic.
+- Because expansion is **single-pass** (`EMP-08`, A.4), the directory count after one
+  expansion is final; a token cannot expand into text that expands again into more
+  separators.
+
+---
+
 ## Appendix B — Source index
 
 | Topic | URL |
@@ -1056,6 +1105,7 @@ is a heuristic rather than a parse.
 
 | Version | Date | Changes |
 |---|---|---|
+| 2.3 | 2026-07-25 | Added `EMP-22` to §9.7 and Appendix A: a .NET process without `longPathAware` handled a 307-character path on a `LongPathsEnabled=1` machine, contradicting the documented "both conditions" rule — recorded as observed-but-unreliable, with `\?\` as the dependable escape. Verified `EMP-15` (post-expansion `;` splitting) and recorded it as Appendix A.5: one token really does contribute N search directories, because the builder expands the value when constructing the block and consumers split afterwards — nothing re-expands `PATH` at lookup time. Updated §9.2. |
 | 2.2 | 2026-07-25 | Verified `EMP-08` (expansion is single-pass; cycles terminate) and recorded it as Appendix A.4, with the unresolved-`%VAR%` detection rule the probe established — the naive "two `%` survive" test false-positives on `%%`-doubling and on real directories containing percent signs. Updated §5.3. |
 | 2.1 | 2026-07-25 | Verified the three data-safety empirical claims on build 10.0.19045.6466 and recorded results in Appendix A (new "Recorded results" section, A.1–A.3). **`EMP-06` refuted** — the environment builder skips `REG_MULTI_SZ` entirely, so a `Path` stored that way is absent from the environment rather than tolerated. **`EMP-07` found worse than assumed** — behavior depends on byte-count parity; odd/zero `cbData` is stored verbatim and the builder reads past it into adjacent block memory, leaking unrelated variables' values. `EMP-05` confirmed. Updated §4.2, §17, and the Appendix A table accordingly. |
 | 2.0 | 2026-07-25 | Merged the standalone PATH reference in; added evidence taxonomy (§0.1) and implementation-status labels (§0.2); added safe registry string handling (§4.3); added the PATH entry data model (§9.1), raw-vs-effective directories (§9.2), and duplicate confidence levels (§9.3); replaced the single search-order narrative with a resolver-profile matrix (§9.5) including `SearchPathW`/`SafeProcessSearchMode`; corrected App Paths to include HKCU (§9.6); added the create/update/delete contract (§11); reworked the protected-variable table by origin and scope (§12); added optimistic concurrency (§14) and the backup schema (§15); added Appendix A empirical claims backlog. |
