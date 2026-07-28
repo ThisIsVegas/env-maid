@@ -15,11 +15,29 @@ public partial class MainViewModel : ObservableObject
     private readonly CliToolListService _cliTools;
     private IReadOnlyList<string> _baselineUser = Array.Empty<string>();
     private IReadOnlyList<string> _baselineSystem = Array.Empty<string>();
+
+    // The stored values behind those lists, kept unparsed. Splitting is lossy — a trailing ';'
+    // and a doubled ';;' both vanish — so an external edit can survive a round-trip through the
+    // parsed form undetected. Conflict detection compares these, not the lists (§14 step 1).
+    private VariableValue _storedBaselineUser = VariableValue.Absent;
+    private VariableValue _storedBaselineSystem = VariableValue.Absent;
+
     private bool _isRefreshing;
 
     /// <summary>Shows the save-diff confirm gate. Returns true to proceed with the
     /// write. Set by the view; if null, the save proceeds without confirmation.</summary>
     public Func<IReadOnlyList<ScopeDiff>, bool>? ConfirmSave { get; set; }
+
+    /// <summary>
+    /// Asks the user what to do about a scope that changed outside EnvMaid since the scan.
+    /// Set by the view.
+    /// </summary>
+    /// <remarks>
+    /// If null the scope is <b>cancelled</b>, not overwritten. The other delegates here proceed
+    /// when unset because they confirm something the user asked for; this one guards a change
+    /// the user has not seen yet.
+    /// </remarks>
+    public Func<ConflictPrompt, ConflictResolution>? ResolveConflict { get; set; }
 
     /// <summary>Prompts for a file path to export the current PATH to (Save dialog).
     /// Returns null if cancelled. Set by the view.</summary>
@@ -96,12 +114,16 @@ public partial class MainViewModel : ObservableObject
         {
             try
             {
-                _baselineUser = _envService.GetEntries(PathScope.User).ToList();
-                _baselineSystem = _envService.GetEntries(PathScope.System).ToList();
+                _storedBaselineUser = _envService.GetStoredValue(PathScope.User);
+                _storedBaselineSystem = _envService.GetStoredValue(PathScope.System);
+                _baselineUser = EnvironmentPathService.SplitEntries(_storedBaselineUser).ToList();
+                _baselineSystem = EnvironmentPathService.SplitEntries(_storedBaselineSystem).ToList();
             }
             catch (UnsupportedPathValueTypeException ex)
             {
                 unreadable = ex.Message;
+                _storedBaselineUser = VariableValue.Absent;
+                _storedBaselineSystem = VariableValue.Absent;
                 _baselineUser = Array.Empty<string>();
                 _baselineSystem = Array.Empty<string>();
             }
@@ -218,23 +240,119 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
+        // Back up the values actually being replaced — what is on disk right now, not the
+        // baseline from the last scan. If something changed underneath us, that change is what
+        // an undo has to be able to bring back.
         var backupFile = _backupService.CreateBackup(currentUser, currentSystem);
 
-        _envService.SetEntries(PathScope.User, UserPaths.Entries.Select(e => e.Path));
-
-        var systemEntries = SystemPaths.Entries.Select(e => e.Path).ToList();
-        var systemResult = ApplySystemPathIfChanged(currentSystem, systemEntries);
-
-        _envService.BroadcastEnvironmentChange();
-
-        var savedMessage = systemResult switch
+        var results = new List<ScopeSaveResult>
         {
-            SystemPathApplyResult.NotChanged => $"Saved. Backup: {Path.GetFileName(backupFile)}",
-            SystemPathApplyResult.Applied => $"Saved (including System PATH). Backup: {Path.GetFileName(backupFile)}",
-            _ => $"User PATH saved. System PATH not applied (elevation cancelled or failed). Backup: {Path.GetFileName(backupFile)}",
+            SaveScope(PathScope.User, _storedBaselineUser, currentUser, stagedUser),
+            SaveScope(PathScope.System, _storedBaselineSystem, currentSystem, stagedSystem),
         };
+
+        // One broadcast per save, after every scope is written (§14 step 7) — not one per scope.
+        if (results.Any(r => r.Status is ScopeSaveStatus.Written or ScopeSaveStatus.WrittenButUnverified))
+            _envService.BroadcastEnvironmentChange();
+
+        var savedMessage = DescribeSave(results, backupFile);
         Rescan();
         StatusMessage = savedMessage;
+    }
+
+    /// <summary>
+    /// Re-reads one scope, resolves any external change, writes, and verifies the read-back.
+    /// </summary>
+    /// <remarks>
+    /// Scopes are independent: a conflict in one never blocks the other, since the user may not
+    /// even be editing it (§13 partial success).
+    /// </remarks>
+    private ScopeSaveResult SaveScope(
+        PathScope scope,
+        VariableValue baseline,
+        IReadOnlyList<string> onDisk,
+        IReadOnlyList<string> staged)
+    {
+        var current = _envService.GetStoredValue(scope);
+
+        if (current != baseline)
+        {
+            var resolution = ResolveConflictFor(scope, baseline, onDisk, staged);
+            if (resolution == ConflictResolution.Cancel)
+                return new ScopeSaveResult(scope, ScopeSaveStatus.SkippedConflict,
+                    $"{scope} PATH changed outside EnvMaid; left untouched.");
+
+            if (resolution == ConflictResolution.Reload)
+                // Rescan at the end of Save picks the new value up; nothing to write here.
+                return new ScopeSaveResult(scope, ScopeSaveStatus.SkippedConflict,
+                    $"{scope} PATH reloaded from disk; your edits to it were discarded.");
+        }
+
+        if (EnvironmentPathService.SplitEntries(current).SequenceEqual(staged, StringComparer.Ordinal))
+            return new ScopeSaveResult(scope, ScopeSaveStatus.Unchanged);
+
+        try
+        {
+            if (scope == PathScope.System && !EnvironmentPathService.IsAdministrator())
+            {
+                return _envService.TryElevateSetSystemPath(string.Join(';', staged))
+                    // The elevated helper does its own write; we cannot verify it from here.
+                    ? new ScopeSaveResult(scope, ScopeSaveStatus.Written)
+                    : new ScopeSaveResult(scope, ScopeSaveStatus.ElevationFailed,
+                        "System PATH not applied (elevation cancelled or failed).");
+            }
+
+            var verified = _envService.SetEntries(scope, staged);
+            return verified
+                ? new ScopeSaveResult(scope, ScopeSaveStatus.Written)
+                : new ScopeSaveResult(scope, ScopeSaveStatus.WrittenButUnverified,
+                    $"{scope} PATH was written but did not read back as written. " +
+                    "It has been left as-is; rescan to see what is stored.");
+        }
+        catch (Exception ex)
+        {
+            return new ScopeSaveResult(scope, ScopeSaveStatus.Failed, $"{scope} PATH not saved: {ex.Message}");
+        }
+    }
+
+    private ConflictResolution ResolveConflictFor(
+        PathScope scope, VariableValue baseline, IReadOnlyList<string> onDisk, IReadOnlyList<string> staged)
+    {
+        // No delegate means Cancel, inverting the convention the other gates use. Those confirm
+        // an action the user already asked for; this one guards a change they have not seen, and
+        // an unconfigured view must not silently discard it.
+        if (ResolveConflict is null)
+            return ConflictResolution.Cancel;
+
+        var baselineEntries = EnvironmentPathService.SplitEntries(baseline);
+        var prompt = new ConflictPrompt(
+            scope,
+            Summarize(_diffService.Diff(scope, baselineEntries, onDisk)),
+            Summarize(_diffService.Diff(scope, baselineEntries, staged)));
+
+        return ResolveConflict(prompt);
+    }
+
+    private static IReadOnlyList<string> Summarize(ScopeDiff diff) =>
+        diff.Changes.Select(c => c.Kind switch
+        {
+            PathChangeKind.Added => $"+ {c.DisplayPath}",
+            PathChangeKind.Removed => $"- {c.DisplayPath}",
+            PathChangeKind.Changed => $"~ {c.DisplayPreviousPath} -> {c.DisplayPath}",
+            _ => $"= {c.DisplayPath} (moved)",
+        }).ToList();
+
+    private static string DescribeSave(IReadOnlyList<ScopeSaveResult> results, string backupFile)
+    {
+        var notes = results.Where(r => r.Detail is not null).Select(r => r.Detail!).ToList();
+        var wrote = results.Any(r => r.Status is ScopeSaveStatus.Written or ScopeSaveStatus.WrittenButUnverified);
+
+        var headline = wrote ? "Saved." : "Nothing was written.";
+        var backup = $"Backup: {Path.GetFileName(backupFile)}";
+
+        return notes.Count == 0
+            ? $"{headline} {backup}"
+            : $"{headline} {string.Join(" ", notes)} {backup}";
     }
 
     [RelayCommand]
@@ -252,51 +370,40 @@ public partial class MainViewModel : ObservableObject
         var userEntries = backup.UserPath.Length > 0 ? backup.UserPath.Split(';') : Array.Empty<string>();
         var systemEntries = backup.SystemPath.Length > 0 ? backup.SystemPath.Split(';') : Array.Empty<string>();
 
+        IReadOnlyList<string> currentUser;
         IReadOnlyList<string> currentSystem;
         try
         {
+            // Read both scopes *before* writing either, so an unreadable value aborts the whole
+            // restore rather than leaving User written and System not.
+            currentUser = _envService.GetEntries(PathScope.User);
             currentSystem = _envService.GetEntries(PathScope.System);
         }
         catch (UnsupportedPathValueTypeException ex)
         {
-            // Read the System PATH *before* writing anything, so an unreadable value
-            // aborts the whole restore rather than leaving User written and System not.
             HasPathReadError = true;
             StatusMessage = ex.Message;
             return;
         }
 
-        _envService.SetEntries(PathScope.User, userEntries);
-
-        var systemResult = ApplySystemPathIfChanged(currentSystem, systemEntries);
-
-        _envService.BroadcastEnvironmentChange();
-
-        StatusMessage = systemResult switch
+        // Restore writes to the environment immediately, exactly like Save, so it needs the same
+        // conflict gate: restoring a stale backup over an installer's change is §14 verbatim.
+        var results = new List<ScopeSaveResult>
         {
-            SystemPathApplyResult.Failed => $"User PATH restored. System PATH not applied (elevation cancelled or failed).",
-            _ => $"Restored from {backupFileName}.",
+            SaveScope(PathScope.User, _storedBaselineUser, currentUser, userEntries),
+            SaveScope(PathScope.System, _storedBaselineSystem, currentSystem, systemEntries),
         };
+
+        if (results.Any(r => r.Status is ScopeSaveStatus.Written or ScopeSaveStatus.WrittenButUnverified))
+            _envService.BroadcastEnvironmentChange();
+
+        var notes = results.Where(r => r.Detail is not null).Select(r => r.Detail!).ToList();
+        var message = notes.Count == 0
+            ? $"Restored from {backupFileName}."
+            : $"Restored from {backupFileName}. {string.Join(" ", notes)}";
+
         Rescan();
-    }
-
-    private enum SystemPathApplyResult { NotChanged, Applied, Failed }
-
-    private SystemPathApplyResult ApplySystemPathIfChanged(IReadOnlyList<string> currentSystem, IReadOnlyList<string> newSystem)
-    {
-        if (currentSystem.SequenceEqual(newSystem))
-            return SystemPathApplyResult.NotChanged;
-
-        if (EnvironmentPathService.IsAdministrator())
-        {
-            _envService.SetEntries(PathScope.System, newSystem);
-            return SystemPathApplyResult.Applied;
-        }
-
-        var joined = string.Join(';', newSystem);
-        return _envService.TryElevateSetSystemPath(joined)
-            ? SystemPathApplyResult.Applied
-            : SystemPathApplyResult.Failed;
+        StatusMessage = message;
     }
 
     /// <summary>Write the current staged PATH (both scopes) to a user-chosen file.</summary>

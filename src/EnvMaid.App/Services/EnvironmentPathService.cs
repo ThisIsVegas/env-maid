@@ -95,7 +95,13 @@ public class EnvironmentPathService
         return value.RawData.Split(';');
     }
 
-    public void SetEntries(PathScope scope, IEnumerable<string> entries)
+    /// <summary>Writes the entries and reports whether the stored value read back as written.</summary>
+    /// <remarks>
+    /// A mismatch is reported, never rolled back (§14 step 6): the write already happened, and
+    /// rewriting to "fix" it would be a second unverified write onto a value that is already in
+    /// an unexpected state.
+    /// </remarks>
+    public bool SetEntries(PathScope scope, IEnumerable<string> entries)
     {
         // Empty entries are tolerated on read but dropped on write: a stray ";;" resolves to the
         // current directory for some consumers, which is never what an editor should persist.
@@ -106,7 +112,10 @@ public class EnvironmentPathService
             ? existing.Type
             : EnvironmentVariableStore.TypeForNewValue(PathValueName, joined);
 
-        _store.Write(scope, PathValueName, VariableValue.Of(type, joined));
+        var intended = VariableValue.Of(type, joined);
+        _store.Write(scope, PathValueName, intended);
+
+        return _store.Read(scope, PathValueName) == intended;
     }
 
     public void BroadcastEnvironmentChange()
