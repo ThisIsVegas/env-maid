@@ -20,6 +20,12 @@ public partial class MainWindow : Window
             var dialog = new SaveDiffDialog(diffs) { Owner = this };
             return dialog.ShowDialog() == true;
         };
+        _viewModel.ResolveConflict = prompt =>
+        {
+            var dialog = new ConflictDialog(prompt) { Owner = this };
+            dialog.ShowDialog();
+            return dialog.Resolution;
+        };
         _viewModel.UserPaths.ConfirmMaintenance = ShowMaintenancePreview;
         _viewModel.SystemPaths.ConfirmMaintenance = ShowMaintenancePreview;
         _viewModel.PickExportFile = () =>
