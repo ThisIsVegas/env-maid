@@ -1,6 +1,6 @@
 # Windows Environment Variables — Canonical Reference & Implementation Specification
 
-**Document version:** 2.3
+**Document version:** 2.4
 **Last revised:** 2026-07-25
 **Status:** Canonical. This document is the source of truth for Windows environment-variable
 behavior in this repository. `windows-path-reference.md` is a compatibility redirect and must
@@ -633,15 +633,22 @@ determine which extensions to look for **and in what order**.
 
 Typical default: `.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC`
 
-> ⚠️ **Documentation conflict.** The `path` command reference claims a fixed precedence of
-> `.exe, .com, .bat, .cmd`, contradicting the shipped default `PATHEXT` which begins
-> `.COM;.EXE;…`. `PATHEXT` is authoritative in practice; that page appears to carry
-> MS-DOS-era text. **[EMP]** `EMP-18` — resolve by test, and record which is true.
+> ⚠️ **Documentation conflict — resolved by test.** The `path` command reference claims a
+> fixed precedence of `.exe, .com, .bat, .cmd`, contradicting the shipped default `PATHEXT`
+> which begins `.COM;.EXE;…`.
+>
+> **[EMP]** `EMP-18` — ✅ **`PATHEXT` is authoritative; the `path` page is wrong**
+> (2026-07-25, build 10.0.19045.6466). With `marker.com` and `marker.exe` in one directory,
+> `.com` wins under the default `PATHEXT`, and reversing `PATHEXT` to `.EXE;.COM` flips the
+> winner. Extension precedence follows `PATHEXT`, not any fixed list.
+> See [Appendix A.6](#a6--emp-18-emp-19-confirmed-pathext-precedence-and-interleaving).
 
-- **[EMP]** `EMP-19` — the interleaving. Observed behavior is **directory-major**: for each
-  directory in `PATH`, try each extension in `PATHEXT` order, then move on. So `foo.bat` in
-  an early directory beats `foo.exe` in a later one. No Microsoft page states the nesting.
-  This directly determines conflict-analysis output, so it needs a real test.
+- **[EMP]** `EMP-19` — ✅ **confirmed by test** (2026-07-25, build 10.0.19045.6466). The
+  interleaving is **directory-major**: for each directory in `PATH`, every extension in
+  `PATHEXT` order is tried before moving to the next directory. `dir1\cross.bat` beats
+  `dir2\cross.exe` even though `.EXE` precedes `.BAT` in `PATHEXT`. PowerShell resolves the
+  same way. No Microsoft page states the nesting; this is observed behaviour.
+  See [Appendix A.6](#a6--emp-18-emp-19-confirmed-pathext-precedence-and-interleaving).
 
 ### Other semicolon-delimited variables 🟡 PLANNED
 
@@ -913,9 +920,9 @@ source link, or considered settled with a recorded test result.
 | EMP-14 | Empty entries are ignored (not CWD) | `PATH=C:\a;;C:\b` with an exe in CWD | — | — | — |
 | EMP-15 | Post-expansion `;` splitting | `TOOLCHAIN=C:\a;C:\b`, `PATH=%TOOLCHAIN%`; run exes from both | 10.0.19045.6466 (22H2) | ✅ **Confirmed** — builder expands, consumers split; one token yields N directories. Nothing re-expands at lookup. See A.5 | 2026-07-25 |
 | EMP-16 | Cost of duplicate entries | Measure resolution latency vs entry count | — | — | — |
-| EMP-17 | **Machine entries precede User entries** | Distinct marker dirs in each scope; check merged order | — | — | — |
-| EMP-18 | `PATHEXT` order beats the `path` doc's claim | Same-named `.com` and `.exe` in one dir | — | — | — |
-| EMP-19 | **Directory-major PATHEXT interleaving** | `a.bat` in dir1, `a.exe` in dir2; run `a` | — | — | — |
+| EMP-17 | **Machine entries precede User entries** | Distinct marker dirs in each scope; check merged order | 10.0.19045.6466 (22H2) | ⚠️ **Partial** — order significance confirmed (first-listed directory wins); the Machine-before-User *composition* itself still untested. See A.6 | 2026-07-25 |
+| EMP-18 | `PATHEXT` order beats the `path` doc's claim | Same-named `.com` and `.exe` in one dir | 10.0.19045.6466 (22H2) | ✅ **Confirmed** — `PATHEXT` is authoritative; the `path` doc's fixed `.exe`-first claim is **wrong**. See A.6 | 2026-07-25 |
+| EMP-19 | **Directory-major PATHEXT interleaving** | `a.bat` in dir1, `a.exe` in dir2; run `a` | 10.0.19045.6466 (22H2) | ✅ **Confirmed** — directory-major: `dir1.bat` beats `dir2.exe`. Same result in PowerShell. See A.6 | 2026-07-25 |
 | EMP-20 | `INCLUDE`/`LIB`/`PSModulePath` list semantics | Per-consumer behavior check | — | — | — |
 | EMP-21 | Origin classification in §12 table | Three-way registry vs process-block diff | — | — | — |
 | EMP-22 | .NET long-path I/O works without `longPathAware` when `LongPathsEnabled=1` | Create/enumerate a >260-char path from an unmanifested process | 10.0.19045.6466 (22H2) | ⚠️ **Observed** — 307-char path worked; contradicts the documented "both conditions" rule. Do not rely on it (§9.7) | 2026-07-25 |
@@ -1065,6 +1072,46 @@ Consequences:
 
 ---
 
+#### A.6 — `EMP-18`, `EMP-19` confirmed (PATHEXT precedence and interleaving)
+
+Verified 2026-07-25 on build 10.0.19045.6466. `PATHEXT` on the test machine was
+`.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC;.PY;.PYW`.
+Probe: [`docs/prototypes/PathExtProbe.cs`](../prototypes/PathExtProbe.cs).
+
+**`EMP-18` — extension precedence follows `PATHEXT`, not the `path` doc.**
+
+`marker.com` (a copy of `whoami.exe`, prints the user) and `marker.exe` (a copy of
+`hostname.exe`, prints the machine) in one directory:
+
+| `PATHEXT` | `marker` runs |
+|---|---|
+| `.COM;.EXE` (default order) | **`.com`** — printed the user |
+| `.EXE;.COM` (reversed) | **`.exe`** — printed the machine |
+| `.BAT;.COM;.EXE` | **`.bat`** — printed its marker |
+
+The winner tracks `PATHEXT` exactly. The `path` command reference's fixed
+`.exe, .com, .bat, .cmd` precedence is **not** what the shell does.
+
+**`EMP-19` — the interleaving is directory-major.**
+
+`dir1\cross.bat` (earlier directory, *later* extension) versus `dir2\cross.exe`
+(later directory, *earlier* extension), with `PATH = dir1;dir2`:
+
+| Shell | Result |
+|---|---|
+| `cmd.exe` | `dir1\cross.bat` |
+| PowerShell | `dir1\cross.bat` (`Get-Command` resolves to the same file) |
+
+Directory order dominates extension order: every extension is tried in one directory before
+moving on. An entry earlier on `PATH` shadows a later one **regardless of extension**.
+
+**`EMP-17` — partial.** Order significance was confirmed (`PATH = dir3;dir4` runs `dir3`'s
+copy; reversing the order reverses the winner), which is the property the Machine-before-User
+model rests on. The composition order **itself** — that Machine entries are placed before User
+entries when the block is built — was not tested here and remains open.
+
+---
+
 ## Appendix B — Source index
 
 | Topic | URL |
@@ -1105,6 +1152,7 @@ Consequences:
 
 | Version | Date | Changes |
 |---|---|---|
+| 2.4 | 2026-07-25 | Verified `EMP-18` and `EMP-19` (Appendix A.6). `PATHEXT` is authoritative for extension precedence — the `path` command reference's fixed `.exe`-first claim is **wrong** — and the interleaving is **directory-major**, so an earlier `PATH` directory shadows a later one regardless of extension. PowerShell resolves identically. `EMP-17` partially covered: order significance confirmed, composition order still open. Updated §10. |
 | 2.3 | 2026-07-25 | Added `EMP-22` to §9.7 and Appendix A: a .NET process without `longPathAware` handled a 307-character path on a `LongPathsEnabled=1` machine, contradicting the documented "both conditions" rule — recorded as observed-but-unreliable, with `\?\` as the dependable escape. Verified `EMP-15` (post-expansion `;` splitting) and recorded it as Appendix A.5: one token really does contribute N search directories, because the builder expands the value when constructing the block and consumers split afterwards — nothing re-expands `PATH` at lookup time. Updated §9.2. |
 | 2.2 | 2026-07-25 | Verified `EMP-08` (expansion is single-pass; cycles terminate) and recorded it as Appendix A.4, with the unresolved-`%VAR%` detection rule the probe established — the naive "two `%` survive" test false-positives on `%%`-doubling and on real directories containing percent signs. Updated §5.3. |
 | 2.1 | 2026-07-25 | Verified the three data-safety empirical claims on build 10.0.19045.6466 and recorded results in Appendix A (new "Recorded results" section, A.1–A.3). **`EMP-06` refuted** — the environment builder skips `REG_MULTI_SZ` entirely, so a `Path` stored that way is absent from the environment rather than tolerated. **`EMP-07` found worse than assumed** — behavior depends on byte-count parity; odd/zero `cbData` is stored verbatim and the builder reads past it into adjacent block memory, leaking unrelated variables' values. `EMP-05` confirmed. Updated §4.2, §17, and the Appendix A table accordingly. |
