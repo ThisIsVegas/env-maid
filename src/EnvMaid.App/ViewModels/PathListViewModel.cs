@@ -12,9 +12,6 @@ namespace EnvMaid.App.ViewModels;
 
 public partial class PathListViewModel : ObservableObject
 {
-    private const int PathLimit = 2047;
-    private const int WarningThreshold = 1800;
-
     private readonly PathNormalizer _normalizer;
     private readonly PathCompressor _compressor;
     private bool _isLoading;
@@ -39,7 +36,7 @@ public partial class PathListViewModel : ObservableObject
     private int _totalLength;
 
     [ObservableProperty]
-    private string _lengthLabel = "Length: 0 / 2047";
+    private string _lengthLabel = "Length: 0 characters";
 
     [ObservableProperty]
     private bool _lengthOverLimit;
@@ -135,30 +132,62 @@ public partial class PathListViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Recomputes the scope readout and the two per-entry length markers.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The caution boundary is not a ceiling — nothing is truncated there, and editing past it in
+    /// EnvMaid is fine. It marks where <em>other</em> PATH-writing tools start mishandling the
+    /// value, which is what a user who also edits PATH from PowerShell needs to know.
+    /// </para>
+    /// <para>
+    /// Colour is reserved for the band that actually blocks a save. A PATH in the caution band is
+    /// common and permanent on many machines; a warning that is always on gets tuned out.
+    /// </para>
+    /// </remarks>
     public void RecalculateLength()
     {
         TotalLength = string.Join(';', Entries.Select(e => e.Path)).Length;
-        LengthLabel = $"Length: {TotalLength} / {PathLimit}";
-        LengthOverLimit = TotalLength >= PathLimit;
-        BarColor = TotalLength >= PathLimit ? RedBrush : TotalLength >= WarningThreshold ? OrangeBrush : GreenBrush;
+        var band = PathLengthLimits.BandFor(TotalLength);
+
+        LengthLabel = $"Length: {TotalLength:N0} characters";
+        LengthOverLimit = band == PathLengthBand.TooLong;
+        BarColor = band switch
+        {
+            PathLengthBand.TooLong => RedBrush,
+            PathLengthBand.Caution => OrangeBrush,
+            _ => GreenBrush,
+        };
 
         var cumulative = 0;
-        PathEntry? lastBeforeCutoff = null;
+        PathEntry? lastBeforeCaution = null;
+        PathEntry? lastBeforeHardLimit = null;
+
         foreach (var entry in Entries)
         {
             entry.IsLengthLimitBoundary = false;
+            entry.IsWriteLimitBoundary = false;
 
-            var wasPastLimit = cumulative > PathLimit;
+            var before = cumulative;
             cumulative += entry.Path.Length;
-            entry.IsPastLengthLimit = cumulative > PathLimit;
-            cumulative += 1; // separator
 
-            if (!wasPastLimit && !entry.IsPastLengthLimit)
-                lastBeforeCutoff = entry;
+            entry.IsPastLengthLimit = cumulative > PathLengthLimits.CautionThreshold;
+            entry.IsPastWriteLimit = cumulative > PathLengthLimits.HardMaximum;
+
+            if (before <= PathLengthLimits.CautionThreshold && !entry.IsPastLengthLimit)
+                lastBeforeCaution = entry;
+            if (before <= PathLengthLimits.HardMaximum && !entry.IsPastWriteLimit)
+                lastBeforeHardLimit = entry;
+
+            cumulative += 1; // separator
         }
 
-        if (lastBeforeCutoff is not null && Entries.Any(e => e.IsPastLengthLimit))
-            lastBeforeCutoff.IsLengthLimitBoundary = true;
+        if (lastBeforeCaution is not null && Entries.Any(e => e.IsPastLengthLimit))
+            lastBeforeCaution.IsLengthLimitBoundary = true;
+
+        if (lastBeforeHardLimit is not null && Entries.Any(e => e.IsPastWriteLimit))
+            lastBeforeHardLimit.IsWriteLimitBoundary = true;
     }
 
     [RelayCommand]

@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using EnvMaid.App.Models;
 using EnvMaid.App.Services;
+using Microsoft.Win32;
 
 namespace EnvMaid.App.ViewModels;
 
@@ -252,10 +253,12 @@ public partial class MainViewModel : ObservableObject
         };
 
         // One broadcast per save, after every scope is written (§14 step 7) — not one per scope.
-        if (results.Any(r => r.Status is ScopeSaveStatus.Written or ScopeSaveStatus.WrittenButUnverified))
-            _envService.BroadcastEnvironmentChange();
+        // The elevated helper deliberately does not broadcast for the System write it performs.
+        var broadcast = results.Any(r => r.Status is ScopeSaveStatus.Written or ScopeSaveStatus.WrittenButUnverified)
+            ? _envService.BroadcastEnvironmentChange()
+            : null;
 
-        var savedMessage = DescribeSave(results, backupFile);
+        var savedMessage = DescribeSave(results, backupFile, broadcast);
         Rescan();
         StatusMessage = savedMessage;
     }
@@ -288,19 +291,20 @@ public partial class MainViewModel : ObservableObject
                     $"{scope} PATH reloaded from disk; your edits to it were discarded.");
         }
 
-        if (EnvironmentPathService.SplitEntries(current).SequenceEqual(staged, StringComparer.Ordinal))
+        var currentEntries = EnvironmentPathService.SplitEntries(current);
+        if (currentEntries.SequenceEqual(staged, StringComparer.Ordinal))
             return new ScopeSaveResult(scope, ScopeSaveStatus.Unchanged);
+
+        var length = string.Join(';', staged.Where(e => !string.IsNullOrWhiteSpace(e))).Length;
+        if (!PathLengthLimits.IsWritable(length))
+            return new ScopeSaveResult(scope, ScopeSaveStatus.Failed,
+                $"{scope} PATH would be {length:N0} characters, past the " +
+                $"{PathLengthLimits.HardMaximum:N0} limit. It was not written.");
 
         try
         {
             if (scope == PathScope.System && !EnvironmentPathService.IsAdministrator())
-            {
-                return _envService.TryElevateSetSystemPath(string.Join(';', staged))
-                    // The elevated helper does its own write; we cannot verify it from here.
-                    ? new ScopeSaveResult(scope, ScopeSaveStatus.Written)
-                    : new ScopeSaveResult(scope, ScopeSaveStatus.ElevationFailed,
-                        "System PATH not applied (elevation cancelled or failed).");
-            }
+                return ElevateSystemScope(current, currentEntries, staged);
 
             var verified = _envService.SetEntries(scope, staged);
             return verified
@@ -313,6 +317,66 @@ public partial class MainViewModel : ObservableObject
         {
             return new ScopeSaveResult(scope, ScopeSaveStatus.Failed, $"{scope} PATH not saved: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Hands the System-scope change to an elevated helper, retrying once if the helper found the
+    /// value had moved and the user chose to proceed anyway.
+    /// </summary>
+    /// <remarks>
+    /// The helper is windowless and cannot prompt, so a conflict comes back here to be resolved
+    /// and then goes down again with a fresh baseline. The retry stops after one attempt rather
+    /// than looping UAC prompts.
+    /// </remarks>
+    private ScopeSaveResult ElevateSystemScope(
+        VariableValue baseline, IReadOnlyList<string> baselineEntries, IReadOnlyList<string> staged)
+    {
+        const PathScope scope = PathScope.System;
+
+        var ops = PathOpService.Diff(baselineEntries, staged);
+        var (code, result) = _envService.ElevateApply(baseline, ops);
+
+        if (code == ElevatedExitCode.Conflict)
+        {
+            var onDisk = result?.OnDiskValue is null
+                ? Array.Empty<string>()
+                : result.OnDiskValue.Split(';');
+
+            var resolution = ResolveConflict is null
+                ? ConflictResolution.Cancel
+                : ResolveConflict(new ConflictPrompt(
+                    scope,
+                    Summarize(_diffService.Diff(scope, baselineEntries, onDisk)),
+                    Summarize(_diffService.Diff(scope, baselineEntries, staged))));
+
+            if (resolution != ConflictResolution.Overwrite)
+                return new ScopeSaveResult(scope, ScopeSaveStatus.SkippedConflict,
+                    "System PATH changed outside EnvMaid; left untouched.");
+
+            // Second and final attempt, against what the helper actually found.
+            var freshBaseline = result?.OnDiskType is not null
+                && Enum.TryParse<RegistryValueKind>(result.OnDiskType, out var kind)
+                    ? VariableValue.Of(kind, result.OnDiskValue ?? string.Empty)
+                    : baseline;
+
+            (code, result) = _envService.ElevateApply(freshBaseline, PathOpService.Diff(onDisk, staged));
+
+            if (code == ElevatedExitCode.Conflict)
+                return new ScopeSaveResult(scope, ScopeSaveStatus.SkippedConflict,
+                    "System PATH kept changing while saving; left untouched.");
+        }
+
+        return code switch
+        {
+            ElevatedExitCode.Applied when result?.Outcome.ReadBackVerified == false =>
+                new ScopeSaveResult(scope, ScopeSaveStatus.WrittenButUnverified,
+                    "System PATH was written but did not read back as written."),
+            ElevatedExitCode.Applied => new ScopeSaveResult(scope, ScopeSaveStatus.Written),
+            ElevatedExitCode.NotRun => new ScopeSaveResult(scope, ScopeSaveStatus.ElevationFailed,
+                "System PATH not applied (elevation was declined)."),
+            _ => new ScopeSaveResult(scope, ScopeSaveStatus.Failed,
+                result?.Outcome.Notes ?? "System PATH not applied."),
+        };
     }
 
     private ConflictResolution ResolveConflictFor(
@@ -342,10 +406,21 @@ public partial class MainViewModel : ObservableObject
             _ => $"= {c.DisplayPath} (moved)",
         }).ToList();
 
-    private static string DescribeSave(IReadOnlyList<ScopeSaveResult> results, string backupFile)
+    private static string DescribeSave(
+        IReadOnlyList<ScopeSaveResult> results, string backupFile, BroadcastResult? broadcast)
     {
         var notes = results.Where(r => r.Detail is not null).Select(r => r.Detail!).ToList();
         var wrote = results.Any(r => r.Status is ScopeSaveStatus.Written or ScopeSaveStatus.WrittenButUnverified);
+
+        if (wrote)
+            // Never "applied everywhere", and never "without a reboot": already-running programs
+            // keep their old environment permanently, and only a restart changes that.
+            notes.Add("Open apps keep the old PATH until restarted.");
+
+        if (broadcast is { Succeeded: false })
+            // A failed broadcast is a caveat on a successful save, not an error. Saying nothing
+            // would turn a stale PATH in a fresh terminal into a debugging session.
+            notes.Add("The shell did not confirm the change — new terminals may show the old PATH until you sign out.");
 
         var headline = wrote ? "Saved." : "Nothing was written.";
         var backup = $"Backup: {Path.GetFileName(backupFile)}";

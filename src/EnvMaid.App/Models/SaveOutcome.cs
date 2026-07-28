@@ -1,5 +1,14 @@
 namespace EnvMaid.App.Models;
 
+/// <summary>
+/// Whether the shell acknowledged a <c>WM_SETTINGCHANGE</c>, and why not when it did not.
+/// </summary>
+/// <remarks>
+/// Never an error state. The write already succeeded; this only decides whether the user is told
+/// that newly launched programs may not see the change until they sign out.
+/// </remarks>
+public record BroadcastResult(bool Succeeded, string? Note);
+
 /// <summary>What a caller chose to do about a scope changed underneath it.</summary>
 public enum ConflictResolution
 {

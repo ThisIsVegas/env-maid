@@ -31,27 +31,53 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// When relaunched elevated to write the System PATH, does just that and exits
-    /// without showing any window. Returns true if this process was such a relaunch.
+    /// When relaunched elevated, applies the intent file it was handed and exits without showing
+    /// any window. Returns true if this process was such a relaunch.
     /// </summary>
+    /// <remarks>
+    /// The whole read → verify → write → read-back cycle happens here, inside the privilege
+    /// boundary, so nothing can change the value between the read and the write. It deliberately
+    /// does not broadcast — the parent does that once for the whole save.
+    /// </remarks>
     private static bool TryRunElevatedHelper(string[] args)
     {
-        if (args.Length < 2 || args[0] != EnvironmentPathService.ElevatedSetSystemPathArg)
+        if (args.Length < 2 || args[0] != EnvironmentPathService.ElevatedApplyArg)
             return false;
+
+        var intentPath = args[1];
 
         try
         {
-            var envService = new EnvironmentPathService();
-            var entries = args[1].Length > 0 ? args[1].Split(';') : Array.Empty<string>();
-            envService.SetEntries(PathScope.System, entries);
-            envService.BroadcastEnvironmentChange();
-            Environment.ExitCode = 0;
+            var intent = ElevatedIntentFile.Read(intentPath);
+            var (code, result) = new ElevatedApplyService().Apply(intent);
+
+            // The outcome goes back through the file, not the exit code: three booleans plus a
+            // note do not fit in an exit status without a code per combination.
+            ElevatedIntentFile.WriteResult(intentPath, intent, result);
+            Environment.ExitCode = (int)code;
         }
-        catch
+        catch (Exception ex)
         {
-            Environment.ExitCode = 1;
+            // The parent cannot see a stack trace, so record what went wrong where it can.
+            TryRecordFailure(intentPath, ex);
+            Environment.ExitCode = (int)ElevatedExitCode.Failed;
         }
 
         return true;
+    }
+
+    private static void TryRecordFailure(string intentPath, Exception ex)
+    {
+        try
+        {
+            ElevatedIntentFile.WriteResult(intentPath, ElevatedIntentFile.Read(intentPath), new ElevatedResult
+            {
+                Outcome = new ElevatedOutcome(false, false, false, ex.Message),
+            });
+        }
+        catch
+        {
+            // The file itself is unreadable or unwritable — the exit code is all the parent gets.
+        }
     }
 }

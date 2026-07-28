@@ -23,11 +23,27 @@ public partial class PathEntry : ObservableObject
     [ObservableProperty]
     private int _globalRank;
 
+    /// <summary>
+    /// This entry sits past the point where some other PATH-writing tools mishandle the value.
+    /// Not a truncation point — nothing is dropped here, and editing it in EnvMaid is safe.
+    /// </summary>
     [ObservableProperty]
     private bool _isPastLengthLimit;
 
+    /// <summary>The last entry before the caution boundary; where the marker row is drawn.</summary>
     [ObservableProperty]
     private bool _isLengthLimitBoundary;
+
+    /// <summary>
+    /// This entry sits past what a single environment variable can hold. A PATH reaching here
+    /// cannot be written at all, and Save is refused until it is shortened.
+    /// </summary>
+    [ObservableProperty]
+    private bool _isPastWriteLimit;
+
+    /// <summary>The last entry before the write limit; where the second marker row is drawn.</summary>
+    [ObservableProperty]
+    private bool _isWriteLimitBoundary;
 
     public ObservableCollection<ShadowConflict> ShadowConflicts { get; } = new();
 

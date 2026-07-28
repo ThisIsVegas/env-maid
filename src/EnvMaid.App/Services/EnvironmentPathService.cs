@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using EnvMaid.App.Models;
@@ -16,7 +17,15 @@ namespace EnvMaid.App.Services;
 /// </remarks>
 public class EnvironmentPathService
 {
-    public const string ElevatedSetSystemPathArg = "--elevated-set-system-path";
+    /// <summary>
+    /// Takes a path to an intent file, never a PATH value.
+    /// </summary>
+    /// <remarks>
+    /// The old <c>--elevated-set-system-path "&lt;joined&gt;"</c> form put the whole value on the
+    /// command line, where it was world-readable, broke on an entry containing a quote, and could
+    /// be silently truncated at the command-line limit. A file path has none of those problems.
+    /// </remarks>
+    public const string ElevatedApplyArg = "--elevated-apply";
 
     /// <summary>The registry value name backing PATH in both scopes.</summary>
     public const string PathValueName = "Path";
@@ -34,6 +43,7 @@ public class EnvironmentPathService
     private const int HWND_BROADCAST_VALUE = 0xffff;
     private const uint WM_SETTINGCHANGE = 0x1A;
     private const uint SMTO_ABORTIFHUNG = 0x2;
+    private const uint BroadcastTimeoutMs = 5000;
 
     public static bool IsAdministrator()
     {
@@ -43,32 +53,84 @@ public class EnvironmentPathService
     }
 
     /// <summary>
-    /// Relaunches this executable elevated (UAC prompt) to write the System PATH,
-    /// since the running process itself cannot upgrade its own token.
+    /// Relaunches this executable elevated (UAC prompt) to apply <paramref name="ops"/> to the
+    /// System PATH, since the running process cannot upgrade its own token.
     /// </summary>
-    public bool TryElevateSetSystemPath(string joinedPath)
+    /// <remarks>
+    /// The helper re-reads the registry, verifies the baseline, applies the ops and writes — all
+    /// inside the elevated process, so nothing can change the value between the read and the
+    /// write. It does not broadcast; the caller does that once for the whole save.
+    /// </remarks>
+    public virtual (ElevatedExitCode Code, ElevatedResult? Result) ElevateApply(
+        VariableValue baseline, IReadOnlyList<PathOp> ops)
     {
-        var exePath = Process.GetCurrentProcess().MainModule?.FileName
-            ?? throw new InvalidOperationException("Could not resolve current executable path.");
-
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = exePath,
-            Arguments = $"{ElevatedSetSystemPathArg} \"{joinedPath}\"",
-            UseShellExecute = true,
-            Verb = "runas",
-        };
-
+        string? intentPath = null;
         try
         {
+            intentPath = ElevatedIntentFile.Create(new ElevatedIntent
+            {
+                Scope = nameof(PathScope.System),
+                ValueName = PathValueName,
+                Baseline = PathOpService.BaselineOf(baseline),
+                Ops = ops,
+            });
+
+            var exePath = Process.GetCurrentProcess().MainModule?.FileName
+                ?? throw new InvalidOperationException("Could not resolve current executable path.");
+
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = exePath,
+                Arguments = $"{ElevatedApplyArg} \"{intentPath}\"",
+                UseShellExecute = true,
+                Verb = "runas",
+            };
+
             using var process = Process.Start(startInfo);
-            process?.WaitForExit();
-            return process?.ExitCode == 0;
+            if (process is null)
+                return (ElevatedExitCode.NotRun, null);
+
+            process.WaitForExit();
+
+            var code = Enum.IsDefined((ElevatedExitCode)process.ExitCode)
+                ? (ElevatedExitCode)process.ExitCode
+                : ElevatedExitCode.Failed;
+
+            // The helper wrote its outcome back into the same file.
+            return (code, ElevatedIntentFile.Read(intentPath).Result);
         }
         catch (Win32Exception)
         {
             // User declined the UAC prompt.
-            return false;
+            return (ElevatedExitCode.NotRun, null);
+        }
+        catch (Exception ex)
+        {
+            return (ElevatedExitCode.Failed, new ElevatedResult
+            {
+                Outcome = new ElevatedOutcome(false, false, false, ex.Message),
+            });
+        }
+        finally
+        {
+            if (intentPath is not null)
+                TryDelete(intentPath);
+        }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (IOException)
+        {
+            // A leftover intent file in the user's temp folder is harmless; failing the save
+            // over it would not be.
+        }
+        catch (UnauthorizedAccessException)
+        {
         }
     }
 
@@ -118,10 +180,28 @@ public class EnvironmentPathService
         return _store.Read(scope, PathValueName) == intended;
     }
 
-    public void BroadcastEnvironmentChange()
+    /// <summary>
+    /// Tells the shell the environment changed, and reports whether it was acknowledged.
+    /// </summary>
+    /// <remarks>
+    /// A failed broadcast is not a failed save and must never roll anything back — the registry
+    /// write already happened. It is worth reporting because a stale PATH in a fresh terminal is
+    /// otherwise unexplainable to the user.
+    /// </remarks>
+    public virtual BroadcastResult BroadcastEnvironmentChange()
     {
         var hwndBroadcast = new IntPtr(HWND_BROADCAST_VALUE);
-        SendMessageTimeout(hwndBroadcast, WM_SETTINGCHANGE, UIntPtr.Zero, "Environment",
-            SMTO_ABORTIFHUNG, 5000, out _);
+        var returned = SendMessageTimeout(hwndBroadcast, WM_SETTINGCHANGE, UIntPtr.Zero, "Environment",
+            SMTO_ABORTIFHUNG, BroadcastTimeoutMs, out _);
+
+        if (returned != IntPtr.Zero)
+            return new BroadcastResult(true, null);
+
+        // SendMessageTimeout returns 0 for both a timeout and a failure; GetLastError tells them
+        // apart, with 0 meaning the timeout.
+        var error = Marshal.GetLastWin32Error();
+        return new BroadcastResult(false, error == 0
+            ? $"SendMessageTimeout timed out after {BroadcastTimeoutMs}ms"
+            : $"SendMessageTimeout failed: {error}");
     }
 }

@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using EnvMaid.App.Models;
+using EnvMaid.App.Services;
 
 namespace EnvMaid.App.ViewModels;
 
@@ -11,7 +12,6 @@ public enum DashboardScope { Combined, User, System }
 /// </summary>
 public partial class DashboardViewModel : ObservableObject
 {
-    private const int PathLimit = 2047;
 
     private readonly PathListViewModel _userPaths;
     private readonly PathListViewModel _systemPaths;
@@ -24,7 +24,7 @@ public partial class DashboardViewModel : ObservableObject
     [ObservableProperty] private int _duplicateCount;
     [ObservableProperty] private int _conflictCount;
     [ObservableProperty] private int _totalLength;
-    [ObservableProperty] private string _lengthLabel = "0 / 2047";
+    [ObservableProperty] private string _lengthLabel = "0 characters";
     [ObservableProperty] private bool _lengthOverLimit;
 
     public int AttentionCount => BrokenCount + DuplicateCount + ConflictCount;
@@ -83,8 +83,9 @@ public partial class DashboardViewModel : ObservableObject
         };
 
         TotalLength = ScopedLength();
-        LengthLabel = $"{TotalLength} / {PathLimit}";
-        LengthOverLimit = TotalLength >= PathLimit;
+        LengthLabel = $"{TotalLength:N0} characters";
+        // Red only for the band that blocks a save; the caution band is common and permanent.
+        LengthOverLimit = PathLengthLimits.BandFor(TotalLength) == PathLengthBand.TooLong;
 
         OnPropertyChanged(nameof(AttentionCount));
         OnPropertyChanged(nameof(HasAttention));
