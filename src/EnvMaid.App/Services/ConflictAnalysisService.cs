@@ -125,6 +125,13 @@ public class ConflictAnalysisService
         {
             yield break;
         }
+        catch (UnauthorizedAccessException)
+        {
+            // A folder on PATH we cannot list is not the same as one with no executables, but
+            // nothing downstream can express that yet. Skipping keeps analysis running; the
+            // entry model's Inaccessible status is where this becomes visible.
+            yield break;
+        }
 
         foreach (var file in files)
             if (ShadowCheckExtensions.Contains(Path.GetExtension(file)))

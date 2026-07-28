@@ -24,7 +24,10 @@ public class OrphanDetectionService
 
     public void ApplyFlags(IReadOnlyList<PathEntry> userEntries, IReadOnlyList<PathEntry> systemEntries)
     {
-        var allEntries = userEntries.Concat(systemEntries).ToList();
+        // System first, matching real PATH resolution order. Grouping does not depend on the
+        // order, but every composition site in the app uses the same one so that none of them
+        // has to be re-derived when someone reads it.
+        var allEntries = systemEntries.Concat(userEntries).ToList();
         var byNormalized = allEntries
             .GroupBy(e => Normalize(e.Path))
             .ToDictionary(g => g.Key, g => g.ToList());
@@ -47,10 +50,14 @@ public class OrphanDetectionService
             if (!Directory.Exists(expanded))
                 continue;
 
+            var files = TryEnumerateFiles(expanded);
+            if (files is null)
+                continue;
+
             var normalizedFolder = Normalize(entry.Path);
 
             entry.ShadowConflicts.Clear();
-            foreach (var file in Directory.EnumerateFiles(expanded))
+            foreach (var file in files)
             {
                 if (!ShadowCheckExtensions.Contains(Path.GetExtension(file)))
                     continue;
@@ -127,13 +134,45 @@ public class OrphanDetectionService
         if (!Directory.Exists(expanded))
             return ("Folder does not exist", FlagConfidence.High, PathFlag.Missing);
 
-        var hasExecutable = Directory.EnumerateFiles(expanded)
-            .Any(f => ExecutableExtensions.Contains(Path.GetExtension(f)));
+        var files = TryEnumerateFiles(expanded);
+        if (files is null)
+            // The folder is there but we are not allowed to list it. Reporting "no executables"
+            // would invite the user to delete a folder that may be full of them.
+            return ("Folder exists but could not be read", FlagConfidence.None, PathFlag.None);
+
+        var hasExecutable = files.Any(f => ExecutableExtensions.Contains(Path.GetExtension(f)));
 
         if (!hasExecutable)
             return ("No executable-type files found", FlagConfidence.Low, PathFlag.NoExecutable);
 
         return (null, FlagConfidence.None, PathFlag.None);
+    }
+
+    /// <summary>
+    /// Lists a folder's files, or returns <c>null</c> when it exists but cannot be read.
+    /// </summary>
+    /// <remarks>
+    /// <c>Directory.Exists</c> answers "is there a folder here", not "may I list it" — a folder
+    /// on PATH under another user's profile answers yes to the first and throws on the second.
+    /// Returning null keeps that distinct from a genuinely empty folder.
+    /// </remarks>
+    // Not directly unit-tested: reproducing it needs a folder with a deny ACL, which means
+    // mutating machine state from a test. The behaviour is one try/catch; the risk it removes
+    // (mislabelling an unreadable folder "no executables") is what earns the branch.
+    private static IReadOnlyList<string>? TryEnumerateFiles(string expandedFolder)
+    {
+        try
+        {
+            return Directory.GetFiles(expandedFolder);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+        catch (IOException)
+        {
+            return null;
+        }
     }
 
     private static string Normalize(string path)
