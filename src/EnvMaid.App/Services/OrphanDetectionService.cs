@@ -5,21 +5,27 @@ namespace EnvMaid.App.Services;
 
 public class OrphanDetectionService
 {
+    /// <summary>
+    /// Answers "does this folder look useful?" — deliberately <em>not</em> derived from PATHEXT.
+    /// </summary>
+    /// <remarks>
+    /// <c>.dll</c> is the clearest reason the two sets differ: it will never be in PATHEXT, but a
+    /// DLL-only folder on PATH is legitimate because the loader searches PATH as its last stage.
+    /// Deriving this from PATHEXT would flag such a folder as having no executables, which is
+    /// wrong. <c>.ps1</c> is similar — PowerShell runs it, but it is not a bare command.
+    /// </remarks>
     private static readonly HashSet<string> ExecutableExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".exe", ".bat", ".cmd", ".ps1", ".dll"
     };
 
-    private static readonly HashSet<string> ShadowCheckExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".exe", ".bat", ".cmd"
-    };
-
     private readonly ConflictRanker _ranker;
+    private readonly PathExtService _pathExt;
 
-    public OrphanDetectionService(ConflictRanker ranker)
+    public OrphanDetectionService(ConflictRanker ranker, PathExtService? pathExt = null)
     {
         _ranker = ranker;
+        _pathExt = pathExt ?? new PathExtService();
     }
 
     public void ApplyFlags(IReadOnlyList<PathEntry> userEntries, IReadOnlyList<PathEntry> systemEntries)
@@ -41,8 +47,8 @@ public class OrphanDetectionService
 
     private void ApplyShadowFlags(IReadOnlyList<PathEntry> resolutionOrderEntries)
     {
-        // exe name -> the winning (first-seen) folder + full file path of the winner.
-        var seenExeNames = new Dictionary<string, (string Normalized, string Display, string WinnerFile)>(StringComparer.OrdinalIgnoreCase);
+        // command name (no extension) -> the winning folder + the file that actually runs.
+        var seenCommands = new Dictionary<string, (string Normalized, string Display, string WinnerFile)>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var entry in resolutionOrderEntries)
         {
@@ -57,13 +63,10 @@ public class OrphanDetectionService
             var normalizedFolder = Normalize(entry.Path);
 
             entry.ShadowConflicts.Clear();
-            foreach (var file in files)
+            foreach (var (command, file) in WinnersPerCommand(files))
             {
-                if (!ShadowCheckExtensions.Contains(Path.GetExtension(file)))
-                    continue;
-
                 var name = Path.GetFileName(file);
-                if (seenExeNames.TryGetValue(name, out var first))
+                if (seenCommands.TryGetValue(command, out var first))
                 {
                     if (!string.Equals(first.Normalized, normalizedFolder, StringComparison.OrdinalIgnoreCase)
                         && !entry.ShadowConflicts.Any(c => c.ExeName == name))
@@ -74,7 +77,7 @@ public class OrphanDetectionService
                 }
                 else
                 {
-                    seenExeNames[name] = (normalizedFolder, expanded, file);
+                    seenCommands[command] = (normalizedFolder, expanded, file);
                 }
             }
 
@@ -156,6 +159,34 @@ public class OrphanDetectionService
     /// on PATH under another user's profile answers yes to the first and throws on the second.
     /// Returning null keeps that distinct from a genuinely empty folder.
     /// </remarks>
+    /// <summary>
+    /// For one folder's files, the file that would actually run for each command it provides.
+    /// </summary>
+    /// <remarks>
+    /// Within a folder PATHEXT order decides, so a <c>foo.com</c> beside a <c>foo.exe</c> means
+    /// the <c>.exe</c> never runs by that name and does not represent the folder.
+    /// </remarks>
+    private IEnumerable<(string Command, string File)> WinnersPerCommand(IReadOnlyList<string> files)
+    {
+        var best = new Dictionary<string, (string File, int Precedence)>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var file in files)
+        {
+            var precedence = _pathExt.PrecedenceOf(Path.GetExtension(file));
+            if (precedence < 0)
+                continue; // not runnable as a bare command
+
+            var command = Path.GetFileNameWithoutExtension(file);
+            if (command.Length == 0)
+                continue;
+
+            if (!best.TryGetValue(command, out var current) || precedence < current.Precedence)
+                best[command] = (file, precedence);
+        }
+
+        return best.Select(kv => (kv.Key, kv.Value.File));
+    }
+
     // Not directly unit-tested: reproducing it needs a folder with a deny ACL, which means
     // mutating machine state from a test. The behaviour is one try/catch; the risk it removes
     // (mislabelling an unreadable folder "no executables") is what earns the branch.

@@ -20,8 +20,11 @@ public partial class App : Application
         var envService = new EnvironmentPathService();
         var cliToolListService = new CliToolListService();
         var ranker = new ConflictRanker(cliToolListService);
-        var orphanService = new OrphanDetectionService(ranker);
-        var conflictAnalysisService = new ConflictAnalysisService(ranker);
+        // One PATHEXT reading shared by both analyses, so they cannot disagree about what counts
+        // as a command.
+        var pathExt = new PathExtService();
+        var orphanService = new OrphanDetectionService(ranker, pathExt);
+        var conflictAnalysisService = new ConflictAnalysisService(ranker, pathExt);
         var backupService = new BackupService();
         var diffService = new PathDiffService();
         var mainViewModel = new MainViewModel(envService, orphanService, conflictAnalysisService, backupService, diffService, cliToolListService);

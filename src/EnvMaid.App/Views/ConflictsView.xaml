@@ -23,6 +23,15 @@
                 <TextBlock Text="Command priority" Style="{StaticResource SectionTitle}"/>
                 <TextBlock Text="Windows uses the first available copy of each command."
                            Style="{StaticResource MutedText}" Margin="0,4,0,0"/>
+                <!-- Resolution differs by how a program is launched, so the profile is named
+                     rather than left implied, and the exclusions are stated. -->
+                <TextBlock Text="{Binding ResolverProfile}"
+                           Style="{StaticResource MutedText}"
+                           FontSize="11"
+                           TextWrapping="Wrap"
+                           MaxWidth="640"
+                           HorizontalAlignment="Left"
+                           Margin="0,6,0,0"/>
             </StackPanel>
             <Button x:Name="ConflictToolsButton"
                     Grid.Column="1"
@@ -122,6 +131,16 @@
                                        Style="{StaticResource MutedText}"/>
                         </Border>
                     </StackPanel>
+                    <!-- Only worth saying when the files differ: "tool.bat shadows tool.exe" is
+                         the case that was invisible while groups were keyed on the filename. -->
+                    <TextBlock Style="{StaticResource MutedText}"
+                               TextWrapping="Wrap"
+                               Margin="0,6,0,0"
+                               Visibility="{Binding ShadowsAcrossExtensions, Converter={StaticResource BoolToVis}}">
+                        <Run Text="Typing this command runs"/>
+                        <Run Text="{Binding WinnerFileName, Mode=OneWay}" FontFamily="Cascadia Mono"/>
+                        <Run Text="— the other copies use a different file extension and never run by this name."/>
+                    </TextBlock>
                     <TextBlock Text="Resolution order"
                                Style="{StaticResource EyebrowText}"
                                Margin="0,22,0,10"/>
