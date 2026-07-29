@@ -87,7 +87,7 @@ public partial class PathListViewModel : ObservableObject
 
     private void Entry_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName != nameof(PathEntry.Path))
+        if (e.PropertyName != nameof(PathEntry.RawToken))
             return;
 
         RecalculateLength();
@@ -148,7 +148,7 @@ public partial class PathListViewModel : ObservableObject
     /// </remarks>
     public void RecalculateLength()
     {
-        TotalLength = string.Join(';', Entries.Select(e => e.Path)).Length;
+        TotalLength = string.Join(';', Entries.Select(e => e.RawToken)).Length;
         var band = PathLengthLimits.BandFor(TotalLength);
 
         LengthLabel = $"Length: {TotalLength:N0} characters";
@@ -170,7 +170,7 @@ public partial class PathListViewModel : ObservableObject
             entry.IsWriteLimitBoundary = false;
 
             var before = cumulative;
-            cumulative += entry.Path.Length;
+            cumulative += entry.RawToken.Length;
 
             entry.IsPastLengthLimit = cumulative > PathLengthLimits.CautionThreshold;
             entry.IsPastWriteLimit = cumulative > PathLengthLimits.HardMaximum;
@@ -216,13 +216,13 @@ public partial class PathListViewModel : ObservableObject
     private void Normalize()
     {
         var candidates = Entries
-            .Select(entry => (Entry: entry, After: _normalizer.Normalize(entry.Path)))
-            .Where(item => item.After != item.Entry.Path)
+            .Select(entry => (Entry: entry, After: _normalizer.Normalize(entry.RawToken)))
+            .Where(item => item.After != item.Entry.RawToken)
             .ToList();
         var changes = candidates
             .Select(item => new MaintenanceChange(
                 MaintenanceChangeKind.Change,
-                item.Entry.Path,
+                item.Entry.RawToken,
                 item.After,
                 "The location resolves to the same folder."))
             .ToList();
@@ -242,7 +242,7 @@ public partial class PathListViewModel : ObservableObject
         RunChangeBatch(() =>
         {
             foreach (var operation in operations.Where(operation => operation.Second.IsSelected))
-                operation.First.Entry.Path = operation.First.After;
+                operation.First.Entry.RawToken = operation.First.After;
         });
     }
 
@@ -259,7 +259,7 @@ public partial class PathListViewModel : ObservableObject
         for (var index = 0; index < Entries.Count; index++)
         {
             var entry = Entries[index];
-            var normalized = _normalizer.Normalize(entry.Path);
+            var normalized = _normalizer.Normalize(entry.RawToken);
             if (seen.Add(normalized))
             {
                 firstPositions[normalized] = index + 1;
@@ -268,7 +268,7 @@ public partial class PathListViewModel : ObservableObject
 
             var change = new MaintenanceChange(
                 MaintenanceChangeKind.Remove,
-                entry.Path,
+                entry.RawToken,
                 null,
                 $"Duplicate of position {firstPositions[normalized]}; the first entry will be kept.");
             duplicates.Add((entry, change));
@@ -298,15 +298,13 @@ public partial class PathListViewModel : ObservableObject
     [RelayCommand]
     private void RemoveBroken()
     {
-        var candidates = Entries.Where(e =>
-                e.Flags.HasFlag(PathFlag.Missing) || e.Flags.HasFlag(PathFlag.Empty))
-            .ToList();
+        var candidates = Entries.Where(e => e.IsBroken).ToList();
         var changes = candidates
             .Select(entry => new MaintenanceChange(
                 MaintenanceChangeKind.Remove,
-                entry.Path,
+                entry.RawToken,
                 null,
-                entry.Flags.HasFlag(PathFlag.Empty)
+                entry.Has(DiagnosticKind.EmptyToken)
                     ? "The entry is empty."
                     : "The folder no longer exists."))
             .ToList();
@@ -336,13 +334,13 @@ public partial class PathListViewModel : ObservableObject
     private void Compress()
     {
         var candidates = Entries
-            .Select(entry => (Entry: entry, After: _compressor.Compress(entry.Path)))
-            .Where(item => item.After != item.Entry.Path)
+            .Select(entry => (Entry: entry, After: _compressor.Compress(entry.RawToken)))
+            .Where(item => item.After != item.Entry.RawToken)
             .ToList();
         var changes = candidates
             .Select(item => new MaintenanceChange(
                 MaintenanceChangeKind.Change,
-                item.Entry.Path,
+                item.Entry.RawToken,
                 item.After,
                 "The stored value becomes shorter while resolving to the same folder."))
             .ToList();
@@ -362,7 +360,7 @@ public partial class PathListViewModel : ObservableObject
         RunChangeBatch(() =>
         {
             foreach (var operation in operations.Where(operation => operation.Second.IsSelected))
-                operation.First.Entry.Path = operation.First.After;
+                operation.First.Entry.RawToken = operation.First.After;
         });
     }
 
@@ -389,9 +387,9 @@ public partial class PathListViewModel : ObservableObject
     private void Edit()
     {
         if (SelectedEntry is null) return;
-        var input = PromptForPath("Edit Path", SelectedEntry.Path);
+        var input = PromptForPath("Edit Path", SelectedEntry.RawToken);
         if (!string.IsNullOrWhiteSpace(input))
-            SelectedEntry.Path = input;
+            SelectedEntry.RawToken = input;
     }
 
     [RelayCommand]
@@ -420,7 +418,7 @@ public partial class PathListViewModel : ObservableObject
     private void OpenInExplorer(PathEntry? entry)
     {
         if (entry is null) return;
-        var expanded = Environment.ExpandEnvironmentVariables(entry.Path);
+        var expanded = Environment.ExpandEnvironmentVariables(entry.RawToken);
         if (!Directory.Exists(expanded)) return;
         Process.Start(new ProcessStartInfo { FileName = expanded, UseShellExecute = true });
     }
@@ -429,7 +427,7 @@ public partial class PathListViewModel : ObservableObject
     private void CopyPath(PathEntry? entry)
     {
         if (entry is null) return;
-        TryCopyToClipboard(entry.Path);
+        TryCopyToClipboard(entry.RawToken);
     }
 
     private static void TryCopyToClipboard(string text)

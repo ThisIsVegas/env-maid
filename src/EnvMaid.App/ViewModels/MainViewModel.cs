@@ -147,7 +147,7 @@ public partial class MainViewModel : ObservableObject
 
     private void RefreshAnalysis()
     {
-        _orphanService.ApplyFlags(UserPaths.Entries.ToList(), SystemPaths.Entries.ToList());
+        _orphanService.Analyze(UserPaths.Entries.ToList(), SystemPaths.Entries.ToList());
         UserPaths.RecalculateLength();
         SystemPaths.RecalculateLength();
         RecalculateGlobalRank();
@@ -161,8 +161,8 @@ public partial class MainViewModel : ObservableObject
         // compression intentionally change the saved representation even when the
         // resulting folder is equivalent.
         HasStagedChanges =
-            !_baselineUser.SequenceEqual(UserPaths.Entries.Select(entry => entry.Path), StringComparer.OrdinalIgnoreCase) ||
-            !_baselineSystem.SequenceEqual(SystemPaths.Entries.Select(entry => entry.Path), StringComparer.OrdinalIgnoreCase);
+            !_baselineUser.SequenceEqual(UserPaths.Entries.Select(entry => entry.RawToken), StringComparer.OrdinalIgnoreCase) ||
+            !_baselineSystem.SequenceEqual(SystemPaths.Entries.Select(entry => entry.RawToken), StringComparer.OrdinalIgnoreCase);
     }
 
     private void RecalculateGlobalRank()
@@ -221,8 +221,8 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        var stagedUser = UserPaths.Entries.Select(e => e.Path).ToList();
-        var stagedSystem = SystemPaths.Entries.Select(e => e.Path).ToList();
+        var stagedUser = UserPaths.Entries.Select(e => e.RawToken).ToList();
+        var stagedSystem = SystemPaths.Entries.Select(e => e.RawToken).ToList();
         var diffs = new[]
         {
             _diffService.Diff(PathScope.User, currentUser, stagedUser),
@@ -491,8 +491,8 @@ public partial class MainViewModel : ObservableObject
 
         _backupService.ExportTo(
             target,
-            UserPaths.Entries.Select(e => e.Path),
-            SystemPaths.Entries.Select(e => e.Path));
+            UserPaths.Entries.Select(e => e.RawToken),
+            SystemPaths.Entries.Select(e => e.RawToken));
         StatusMessage = $"Exported to {Path.GetFileName(target)}.";
     }
 

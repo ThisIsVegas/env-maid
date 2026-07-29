@@ -202,7 +202,7 @@
                     <DataGridTemplateColumn Header="LOCATION" Width="*">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
-                                <TextBlock Text="{Binding Path}"
+                                <TextBlock Text="{Binding DisplayValue}"
                                            FontFamily="Cascadia Mono"
                                            TextTrimming="CharacterEllipsis"
                                            Margin="8,0,0,0"
@@ -287,7 +287,7 @@
                                                     RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                   CommandParameter="{Binding PlacementTarget.SelectedItem,
                                                             RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                  IsEnabled="{Binding PlacementTarget.SelectedItem.Path,
+                                  IsEnabled="{Binding PlacementTarget.SelectedItem.ExpandedValue,
                                                       RelativeSource={RelativeSource AncestorType=ContextMenu},
                                                       Converter={StaticResource PathExists}}"/>
                         <MenuItem Header="Copy path"
@@ -337,7 +337,7 @@
                                                FontSize="12"
                                                FontWeight="SemiBold"
                                                Margin="0,0,0,8"/>
-                                    <TextBlock Text="{Binding Path}"
+                                    <TextBlock Text="{Binding DisplayValue}"
                                                FontFamily="Cascadia Mono"
                                                FontSize="15"
                                                TextWrapping="Wrap"/>

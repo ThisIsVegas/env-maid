@@ -57,7 +57,7 @@ public class ConflictsViewModelTests
 
         vm.DeleteLoserCommand.Execute(loserItem);
 
-        Assert.DoesNotContain(user.Entries, e => e.Path == loserPath);
+        Assert.DoesNotContain(user.Entries, e => e.RawToken == loserPath);
         Assert.Empty(vm.Groups); // conflict resolved
     }
 

@@ -28,21 +28,22 @@ public class OrphanDetectionService
         _pathExt = pathExt ?? new PathExtService();
     }
 
-    public void ApplyFlags(IReadOnlyList<PathEntry> userEntries, IReadOnlyList<PathEntry> systemEntries)
+    public void Analyze(IReadOnlyList<PathEntry> userEntries, IReadOnlyList<PathEntry> systemEntries)
     {
         // System first, matching real PATH resolution order. Grouping does not depend on the
         // order, but every composition site in the app uses the same one so that none of them
         // has to be re-derived when someone reads it.
         var allEntries = systemEntries.Concat(userEntries).ToList();
         var byNormalized = allEntries
-            .GroupBy(e => Normalize(e.Path))
+            .GroupBy(e => Normalize(e.RawToken))
             .ToDictionary(g => g.Key, g => g.ToList());
 
-        ApplyFlagsForScope(userEntries, byNormalized);
-        ApplyFlagsForScope(systemEntries, byNormalized);
+        // One pass in resolution order, not one per scope: the copy Windows actually resolves is
+        // the first across both scopes, and the later one is the redundant entry. Walking each
+        // scope separately meant a folder listed in both was never marked duplicate at all.
+        ApplyEntryDiagnostics(allEntries, byNormalized);
 
-        // Real PATH resolution order: System entries first, then User entries appended.
-        ApplyShadowFlags(systemEntries.Concat(userEntries).ToList());
+        ApplyShadowFlags(allEntries);
     }
 
     private void ApplyShadowFlags(IReadOnlyList<PathEntry> resolutionOrderEntries)
@@ -52,7 +53,7 @@ public class OrphanDetectionService
 
         foreach (var entry in resolutionOrderEntries)
         {
-            var expanded = Environment.ExpandEnvironmentVariables(entry.Path);
+            var expanded = entry.ExpandedValue;
             if (!Directory.Exists(expanded))
                 continue;
 
@@ -60,7 +61,7 @@ public class OrphanDetectionService
             if (files is null)
                 continue;
 
-            var normalizedFolder = Normalize(entry.Path);
+            var normalizedFolder = Normalize(entry.RawToken);
 
             entry.ShadowConflicts.Clear();
             foreach (var (command, file) in WinnersPerCommand(files))
@@ -81,74 +82,123 @@ public class OrphanDetectionService
                 }
             }
 
-            if (entry.ShadowConflicts.Count == 0)
-                continue;
-
-            if (entry.Confidence == FlagConfidence.None)
-                entry.Confidence = FlagConfidence.Low;
+            // A shadow conflict is not a diagnostic: it says something about the relationship
+            // between two folders, not about this entry being wrong. HasAttention already
+            // surfaces it, and it must never make an entry auto-selectable for deletion.
         }
     }
 
-    private void ApplyFlagsForScope(IReadOnlyList<PathEntry> scopeEntries, Dictionary<string, List<PathEntry>> byNormalized)
+    private void ApplyEntryDiagnostics(IReadOnlyList<PathEntry> entriesInResolutionOrder, Dictionary<string, List<PathEntry>> byNormalized)
     {
         var seenNormalized = new HashSet<string>();
 
-        foreach (var entry in scopeEntries)
+        foreach (var entry in entriesInResolutionOrder)
         {
-            var (existenceReason, existenceConfidence, existenceFlag) = CheckExistence(entry.Path);
-            var normalized = Normalize(entry.Path);
-            var group = byNormalized[normalized];
+            entry.Diagnostics.Clear();
 
-            var isFirstOccurrence = seenNormalized.Add(normalized);
-            var duplicateReason = !isFirstOccurrence ? BuildDuplicateReason(entry, group) : null;
+            foreach (var diagnostic in ParseDiagnostics(entry))
+                entry.Diagnostics.Add(diagnostic);
 
-            var reasonParts = new List<string>();
-            if (existenceReason is not null) reasonParts.Add(existenceReason);
-            if (duplicateReason is not null) reasonParts.Add(duplicateReason);
+            entry.ExistenceStatus = Validate(entry);
 
-            entry.Reason = string.Join("; ", reasonParts);
+            var normalized = Normalize(entry.RawToken);
+            if (!seenNormalized.Add(normalized))
+                entry.Diagnostics.Add(DuplicateDiagnostic(entry, byNormalized[normalized]));
 
-            entry.Flags = existenceFlag | (duplicateReason is not null ? PathFlag.Duplicate : PathFlag.None);
-
-            entry.Confidence = duplicateReason is not null
-                ? FlagConfidence.High
-                : existenceConfidence;
-
-            entry.IsChecked = entry.Confidence == FlagConfidence.High;
+            // Auto-selection is decided by what is wrong, not by how sure we are. One unsafe
+            // finding vetoes the entry, so a duplicate whose variable also failed to expand is
+            // never silently pre-checked for deletion.
+            entry.IsChecked = entry.IsAutoSelectable;
         }
     }
 
-    private static string? BuildDuplicateReason(PathEntry entry, List<PathEntry> group)
+    /// <summary>Findings that come from the token alone, without touching disk.</summary>
+    private static IEnumerable<Diagnostic> ParseDiagnostics(PathEntry entry)
     {
-        var otherScopes = group.Where(g => g.Scope != entry.Scope).Select(g => g.Scope).Distinct().ToList();
-        if (otherScopes.Count > 0)
-            return $"Duplicate (also in {otherScopes[0]} PATH)";
+        var raw = entry.RawToken;
 
-        return "Duplicate entry";
+        if (string.IsNullOrWhiteSpace(entry.ParsedValue))
+        {
+            yield return new Diagnostic(DiagnosticKind.EmptyToken, Severity.Warning, "Empty entry");
+            yield break;
+        }
+
+        if (raw != raw.Trim())
+            yield return new Diagnostic(DiagnosticKind.SurroundingWhitespace, Severity.Info,
+                "Stored with surrounding spaces. Windows ignores them; EnvMaid keeps the value as stored.");
+
+        var trimmed = raw.Trim();
+        if (trimmed.Length >= 2 && trimmed[0] == '"' && trimmed[^1] == '"')
+            yield return new Diagnostic(DiagnosticKind.SurroundingQuotes, Severity.Info,
+                "Stored with surrounding quotes.");
     }
 
-    private (string? Reason, FlagConfidence Confidence, PathFlag Flag) CheckExistence(string path)
+    /// <summary>Findings that need the filesystem, and the resulting existence status.</summary>
+    private ExistenceStatus Validate(PathEntry entry)
     {
-        var expanded = Environment.ExpandEnvironmentVariables(path);
+        if (entry.Has(DiagnosticKind.EmptyToken))
+            return ExistenceStatus.Unknown;
 
-        if (string.IsNullOrWhiteSpace(expanded))
-            return ("Empty entry", FlagConfidence.High, PathFlag.Empty);
+        var expanded = entry.ExpandedValue;
+
+        // An unexpanded %VAR% means the variable is not defined — which is a different problem
+        // from a deleted folder, and has a different fix. Reporting it as missing would point the
+        // user at deleting an entry when what they need is to define the variable.
+        if (expanded.Contains('%') && entry.ParsedValue.Contains('%'))
+        {
+            entry.Diagnostics.Add(new Diagnostic(DiagnosticKind.UnresolvedVariable, Severity.Warning,
+                "This entry refers to a variable that is not defined, so Windows cannot resolve it."));
+            return ExistenceStatus.Unknown;
+        }
 
         if (!Directory.Exists(expanded))
-            return ("Folder does not exist", FlagConfidence.High, PathFlag.Missing);
+        {
+            entry.Diagnostics.Add(new Diagnostic(DiagnosticKind.FolderMissing, Severity.Error,
+                "Folder does not exist"));
+            return ExistenceStatus.Missing;
+        }
 
         var files = TryEnumerateFiles(expanded);
         if (files is null)
+        {
             // The folder is there but we are not allowed to list it. Reporting "no executables"
             // would invite the user to delete a folder that may be full of them.
-            return ("Folder exists but could not be read", FlagConfidence.None, PathFlag.None);
+            entry.Diagnostics.Add(new Diagnostic(DiagnosticKind.FolderInaccessible, Severity.Info,
+                "Folder exists but could not be read"));
+            return ExistenceStatus.Inaccessible;
+        }
 
-        var hasExecutable = files.Any(f => ExecutableExtensions.Contains(Path.GetExtension(f)));
+        if (!files.Any(f => ExecutableExtensions.Contains(Path.GetExtension(f))))
+            entry.Diagnostics.Add(new Diagnostic(DiagnosticKind.NoExecutables, Severity.Info,
+                "No executable-type files found"));
 
-        if (!hasExecutable)
-            return ("No executable-type files found", FlagConfidence.Low, PathFlag.NoExecutable);
+        return ExistenceStatus.Exists;
+    }
 
-        return (null, FlagConfidence.None, PathFlag.None);
+    /// <summary>
+    /// Classifies a repeat of an already-seen folder.
+    /// </summary>
+    /// <remarks>
+    /// L1 is the same token twice and L2 differs only by case or a trailing separator — both are
+    /// safe to remove automatically. Anything subtler is left for the duplicate-levels work;
+    /// treating it as L2 here would auto-check entries that are not certainly redundant.
+    /// </remarks>
+    private static Diagnostic DuplicateDiagnostic(PathEntry entry, List<PathEntry> group)
+    {
+        var earlier = group.FirstOrDefault(g => !ReferenceEquals(g, entry));
+        var crossScope = group.Any(g => g.Scope != entry.Scope);
+
+        var where = crossScope
+            ? $" (also in {group.First(g => g.Scope != entry.Scope).Scope} PATH)"
+            : string.Empty;
+
+        var exact = earlier is not null
+            && string.Equals(earlier.RawToken, entry.RawToken, StringComparison.Ordinal);
+
+        return exact
+            ? new Diagnostic(DiagnosticKind.DuplicateL1, Severity.Warning, $"Duplicate entry{where}")
+            : new Diagnostic(DiagnosticKind.DuplicateL2, Severity.Warning,
+                $"Duplicate — same folder, written differently{where}");
     }
 
     /// <summary>

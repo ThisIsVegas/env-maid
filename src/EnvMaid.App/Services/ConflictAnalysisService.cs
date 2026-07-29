@@ -54,7 +54,7 @@ public class ConflictAnalysisService
 
         foreach (var entry in resolutionOrder)
         {
-            var expanded = Environment.ExpandEnvironmentVariables(entry.Path);
+            var expanded = entry.ExpandedValue;
             if (!Directory.Exists(expanded))
                 continue;
 
@@ -149,7 +149,7 @@ public class ConflictAnalysisService
     {
         var others = systemEntries.Concat(userEntries)
             .Where(e => !ReferenceEquals(e, folderToRemove.Entry))
-            .Select(e => (Entry: e, Expanded: Environment.ExpandEnvironmentVariables(e.Path)))
+            .Select(e => (Entry: e, Expanded: e.ExpandedValue))
             .Where(x => Directory.Exists(x.Expanded)
                         && !PathsEqual(x.Expanded, folderToRemove.ExpandedFolder))
             .ToList();
@@ -158,7 +158,7 @@ public class ConflictAnalysisService
         foreach (var (command, file) in WinnersPerCommand(folderToRemove.ExpandedFolder))
         {
             var coveringFolder = others.FirstOrDefault(o => ProvidesCommand(o.Expanded, command));
-            result.Add((Path.GetFileName(file), coveringFolder.Entry?.Path));
+            result.Add((Path.GetFileName(file), coveringFolder.Entry?.RawToken));
         }
         return result;
     }

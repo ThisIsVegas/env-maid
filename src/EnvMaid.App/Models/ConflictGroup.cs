@@ -3,7 +3,7 @@ namespace EnvMaid.App.Models;
 /// <summary>One folder on the PATH that provides a given executable.</summary>
 public record ConflictLocation(PathEntry Entry, string ExpandedFolder)
 {
-    public string DisplayPath => Entry.Path;
+    public string DisplayPath => Entry.RawToken;
     public PathScope Scope => Entry.Scope;
 }
 

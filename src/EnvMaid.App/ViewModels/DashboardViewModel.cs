@@ -73,8 +73,8 @@ public partial class DashboardViewModel : ObservableObject
     {
         var entries = ScopedEntries().ToList();
 
-        BrokenCount = entries.Count(e => e.Flags.HasFlag(PathFlag.Missing) || e.Flags.HasFlag(PathFlag.Empty));
-        DuplicateCount = entries.Count(e => e.Flags.HasFlag(PathFlag.Duplicate));
+        BrokenCount = entries.Count(e => e.IsBroken);
+        DuplicateCount = entries.Count(e => e.IsDuplicate);
         ConflictCount = Scope switch
         {
             DashboardScope.User => _conflicts.ConflictCountForScope(PathScope.User),

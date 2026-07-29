@@ -19,8 +19,8 @@ public class PathListViewModelCommandTests
 
         vm.NormalizeCommand.Execute(null);
 
-        Assert.Equal(@"C:\bin", vm.Entries[0].Path);
-        Assert.Equal(@"%JAVA_HOME%\bin", vm.Entries[1].Path);
+        Assert.Equal(@"C:\bin", vm.Entries[0].RawToken);
+        Assert.Equal(@"%JAVA_HOME%\bin", vm.Entries[1].RawToken);
     }
 
     [Fact]
@@ -34,22 +34,22 @@ public class PathListViewModelCommandTests
         vm.RemoveDuplicatesCommand.Execute(null);
 
         Assert.Equal(2, vm.Entries.Count);
-        Assert.Equal(@"C:\bin", vm.Entries[0].Path);
-        Assert.Equal(@"C:\other", vm.Entries[1].Path);
+        Assert.Equal(@"C:\bin", vm.Entries[0].RawToken);
+        Assert.Equal(@"C:\other", vm.Entries[1].RawToken);
     }
 
     [Fact]
     public void RemoveBroken_RemovesMissingAndEmpty_KeepsOthers()
     {
         var vm = NewVm();
-        vm.Entries.Add(new PathEntry(@"C:\good", PathScope.User) { Flags = PathFlag.None });
-        vm.Entries.Add(new PathEntry(@"C:\gone", PathScope.User) { Flags = PathFlag.Missing });
-        vm.Entries.Add(new PathEntry("", PathScope.User) { Flags = PathFlag.Empty });
+        vm.Entries.Add(new PathEntry(@"C:\good", PathScope.User));
+        vm.Entries.Add(EntryFactory.Missing(@"C:\gone", PathScope.User));
+        vm.Entries.Add(EntryFactory.Empty(PathScope.User));
 
         vm.RemoveBrokenCommand.Execute(null);
 
         Assert.Single(vm.Entries);
-        Assert.Equal(@"C:\good", vm.Entries[0].Path);
+        Assert.Equal(@"C:\good", vm.Entries[0].RawToken);
     }
 
     [Fact]
@@ -60,7 +60,7 @@ public class PathListViewModelCommandTests
 
         vm.CompressCommand.Execute(null);
 
-        Assert.Equal(@"%LOCALAPPDATA%\Programs\x", vm.Entries[0].Path);
+        Assert.Equal(@"%LOCALAPPDATA%\Programs\x", vm.Entries[0].RawToken);
     }
 
     [Fact]
@@ -107,8 +107,8 @@ public class PathListViewModelCommandTests
     public void RemoveBroken_PreviewIncludesScope_AndAllowsIndividualExclusion()
     {
         var vm = NewVm();
-        vm.Entries.Add(new PathEntry(@"C:\gone", PathScope.User) { Flags = PathFlag.Missing });
-        vm.Entries.Add(new PathEntry("", PathScope.User) { Flags = PathFlag.Empty });
+        vm.Entries.Add(EntryFactory.Missing(@"C:\gone", PathScope.User));
+        vm.Entries.Add(EntryFactory.Empty(PathScope.User));
         vm.ConfirmMaintenance = preview =>
         {
             Assert.Equal(PathScope.User, preview.Scope);
@@ -119,7 +119,7 @@ public class PathListViewModelCommandTests
         vm.RemoveBrokenCommand.Execute(null);
 
         Assert.Single(vm.Entries);
-        Assert.Equal(@"C:\gone", vm.Entries[0].Path);
+        Assert.Equal(@"C:\gone", vm.Entries[0].RawToken);
     }
 
     [Fact]
@@ -138,7 +138,7 @@ public class PathListViewModelCommandTests
 
         Assert.NotNull(captured);
         Assert.False(captured.HasChanges);
-        Assert.Equal(@"C:\bin", vm.Entries[0].Path);
+        Assert.Equal(@"C:\bin", vm.Entries[0].RawToken);
     }
 
     [Fact]
@@ -150,6 +150,6 @@ public class PathListViewModelCommandTests
 
         vm.NormalizeCommand.Execute(null);
 
-        Assert.Equal(@"C:\bin", vm.Entries[0].Path);
+        Assert.Equal(@"C:\bin", vm.Entries[0].RawToken);
     }
 }
