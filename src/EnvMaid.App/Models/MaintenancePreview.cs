@@ -18,16 +18,23 @@ public partial class MaintenanceChange : ObservableObject
     [ObservableProperty]
     private bool _isSelected = true;
 
+    /// <param name="isSelected">
+    /// Whether the row starts checked. Rows whose consequence the user needs to weigh — a
+    /// duplicate that is only a duplicate today — start unchecked, so acting on them is a
+    /// decision rather than the default.
+    /// </param>
     public MaintenanceChange(
         MaintenanceChangeKind kind,
         string before,
         string? after,
-        string explanation)
+        string explanation,
+        bool isSelected = true)
     {
         Kind = kind;
         Before = before;
         After = after;
         Explanation = explanation;
+        _isSelected = isSelected;
     }
 }
 

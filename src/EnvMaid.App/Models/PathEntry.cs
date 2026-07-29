@@ -54,8 +54,17 @@ public partial class PathEntry : ObservableObject
     /// <summary>The parsed token with <c>%VAR%</c> references expanded. What disk checks use.</summary>
     public string ExpandedValue => Environment.ExpandEnvironmentVariables(ParsedValue);
 
-    /// <summary>Case-folded, trailing-separator-normalized form, for comparing two entries.</summary>
-    public string ComparisonKey => Fold(ExpandedValue);
+    /// <summary>
+    /// Case-folded, trailing-separator-normalized form of the <em>unexpanded</em> token.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not built from <see cref="ExpandedValue"/>. Two entries matching on this key
+    /// are the same token written differently, which is safe to collapse. Two entries matching
+    /// only after expansion — <c>%JAVA_HOME%\bin</c> beside <c>C:\jdk\bin</c> — are separately
+    /// maintained references that happen to agree today, and collapsing those silently is not
+    /// safe. Folding the expanded value would make the two indistinguishable.
+    /// </remarks>
+    public string ComparisonKey => Fold(ParsedValue);
 
     /// <summary>What the grid shows.</summary>
     public string DisplayValue => ParsedValue;

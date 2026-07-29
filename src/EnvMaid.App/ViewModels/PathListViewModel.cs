@@ -251,37 +251,46 @@ public partial class PathListViewModel : ObservableObject
     [RelayCommand]
     private void RemoveDuplicates()
     {
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var firstPositions = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        // Driven by the diagnostics the analysis already assigned, rather than re-deriving a
+        // single "same folder" bucket here. That bucket could not tell an exact repeat from two
+        // separately-maintained references to one folder, and pre-checked both.
         var duplicates = new List<(PathEntry Entry, MaintenanceChange Change)>();
         var changes = new List<MaintenanceChange>();
 
-        for (var index = 0; index < Entries.Count; index++)
+        foreach (var entry in Entries)
         {
-            var entry = Entries[index];
-            var normalized = _normalizer.Normalize(entry.RawToken);
-            if (seen.Add(normalized))
-            {
-                firstPositions[normalized] = index + 1;
+            var kind = DuplicateKindOf(entry);
+
+            // L4 is advisory: a junction or subst alias is reported on the grid, but it is not
+            // offered for bulk removal, because the two paths may exist deliberately.
+            if (kind is null or DiagnosticKind.DuplicateL4)
                 continue;
-            }
+
+            var certain = kind is DiagnosticKind.DuplicateL1 or DiagnosticKind.DuplicateL2;
 
             var change = new MaintenanceChange(
                 MaintenanceChangeKind.Remove,
                 entry.RawToken,
                 null,
-                $"Duplicate of position {firstPositions[normalized]}; the first entry will be kept.");
+                entry.Diagnostics.First(d => d.Kind == kind).Message,
+                isSelected: certain);
+
             duplicates.Add((entry, change));
             changes.Add(change);
         }
 
+        var needsReview = changes.Count(c => !c.IsSelected);
         var preview = new MaintenancePreview(
             Scope,
             $"Remove {changes.Count} duplicate {(changes.Count == 1 ? "entry" : "entries")}?",
             changes.Count == 0
                 ? "No duplicate entries were found."
-                : "The first occurrence of each location will be kept.",
-            $"Stage {changes.Count} {(changes.Count == 1 ? "removal" : "removals")}",
+                : needsReview == 0
+                    ? "The first occurrence of each location will be kept."
+                    : $"The first occurrence of each location will be kept. {needsReview} " +
+                      $"{(needsReview == 1 ? "entry is" : "entries are")} unchecked because removing " +
+                      "them changes how the remaining entry tracks its variable.",
+            "Stage removals",
             changes);
         if (!Confirm(preview))
             return;
@@ -292,6 +301,13 @@ public partial class PathListViewModel : ObservableObject
                 Entries.Remove(item.Entry);
         });
     }
+
+    /// <summary>Which duplicate level this entry carries, if any.</summary>
+    private static DiagnosticKind? DuplicateKindOf(PathEntry entry) => entry.Diagnostics
+        .Where(d => d.Kind is DiagnosticKind.DuplicateL1 or DiagnosticKind.DuplicateL2
+            or DiagnosticKind.DuplicateL3 or DiagnosticKind.DuplicateL4)
+        .Select(d => (DiagnosticKind?)d.Kind)
+        .FirstOrDefault();
 
     /// <summary>Remove entries whose folder is missing or empty (the High-confidence
     /// broken flags). Leaves NoExecutable (Low-confidence) entries alone.</summary>

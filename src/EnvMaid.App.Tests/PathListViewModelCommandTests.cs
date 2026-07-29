@@ -26,9 +26,11 @@ public class PathListViewModelCommandTests
     [Fact]
     public void RemoveDuplicates_KeepsFirst_CollapsesSlashVariants()
     {
+        // RemoveDuplicates acts on the level the analysis assigned, so the duplicate carries the
+        // diagnostic here rather than the command re-deriving "same folder" for itself.
         var vm = NewVm();
         vm.Entries.Add(new PathEntry(@"C:\bin", PathScope.User));
-        vm.Entries.Add(new PathEntry(@"C:\bin\", PathScope.User)); // same folder, trailing slash
+        vm.Entries.Add(EntryFactory.With(@"C:\bin\", PathScope.User, DiagnosticKind.DuplicateL2));
         vm.Entries.Add(new PathEntry(@"C:\other", PathScope.User));
 
         vm.RemoveDuplicatesCommand.Execute(null);
@@ -36,6 +38,42 @@ public class PathListViewModelCommandTests
         Assert.Equal(2, vm.Entries.Count);
         Assert.Equal(@"C:\bin", vm.Entries[0].RawToken);
         Assert.Equal(@"C:\other", vm.Entries[1].RawToken);
+    }
+
+    [Fact]
+    public void RemoveDuplicates_ListsAnL3Unchecked_AndLeavesItAlone()
+    {
+        // Two references to the same folder today, maintained separately. Removing one is a
+        // decision about which reference survives, so it must not happen by default.
+        var vm = NewVm();
+        vm.Entries.Add(new PathEntry(@"C:\jdk\bin", PathScope.User));
+        vm.Entries.Add(EntryFactory.With(@"%JAVA_HOME%\bin", PathScope.User, DiagnosticKind.DuplicateL3));
+        MaintenancePreview? captured = null;
+        vm.ConfirmMaintenance = preview => { captured = preview; return true; };
+
+        vm.RemoveDuplicatesCommand.Execute(null);
+
+        Assert.NotNull(captured);
+        Assert.False(Assert.Single(captured.Changes).IsSelected);
+        Assert.Equal(2, vm.Entries.Count);
+    }
+
+    [Fact]
+    public void RemoveDuplicates_DoesNotOfferAnL4AtAll()
+    {
+        // A junction or subst alias is advisory: the two paths may exist deliberately, so it is
+        // reported on the grid and never offered for bulk removal.
+        var vm = NewVm();
+        vm.Entries.Add(new PathEntry(@"C:\real", PathScope.User));
+        vm.Entries.Add(EntryFactory.With(@"C:\junction", PathScope.User, DiagnosticKind.DuplicateL4));
+        MaintenancePreview? captured = null;
+        vm.ConfirmMaintenance = preview => { captured = preview; return true; };
+
+        vm.RemoveDuplicatesCommand.Execute(null);
+
+        Assert.NotNull(captured);
+        Assert.Empty(captured.Changes);
+        Assert.Equal(2, vm.Entries.Count);
     }
 
     [Fact]
@@ -68,7 +106,7 @@ public class PathListViewModelCommandTests
     {
         var vm = NewVm();
         vm.Entries.Add(new PathEntry(@"C:\bin", PathScope.User));
-        vm.Entries.Add(new PathEntry(@"C:\bin\", PathScope.User));
+        vm.Entries.Add(EntryFactory.With(@"C:\bin\", PathScope.User, DiagnosticKind.DuplicateL2));
         MaintenancePreview? captured = null;
         vm.ConfirmMaintenance = preview =>
         {

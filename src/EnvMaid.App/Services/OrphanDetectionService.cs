@@ -21,27 +21,27 @@ public class OrphanDetectionService
 
     private readonly ConflictRanker _ranker;
     private readonly PathExtService _pathExt;
+    private readonly DirectoryIdentityService _identities;
 
-    public OrphanDetectionService(ConflictRanker ranker, PathExtService? pathExt = null)
+    public OrphanDetectionService(
+        ConflictRanker ranker,
+        PathExtService? pathExt = null,
+        DirectoryIdentityService? identities = null)
     {
         _ranker = ranker;
         _pathExt = pathExt ?? new PathExtService();
+        _identities = identities ?? new DirectoryIdentityService();
     }
 
     public void Analyze(IReadOnlyList<PathEntry> userEntries, IReadOnlyList<PathEntry> systemEntries)
     {
-        // System first, matching real PATH resolution order. Grouping does not depend on the
-        // order, but every composition site in the app uses the same one so that none of them
-        // has to be re-derived when someone reads it.
+        // System first, matching real PATH resolution order — the first copy of a folder is the
+        // one Windows resolves, which is what makes any later copy the redundant one.
         var allEntries = systemEntries.Concat(userEntries).ToList();
-        var byNormalized = allEntries
-            .GroupBy(e => Normalize(e.RawToken))
-            .ToDictionary(g => g.Key, g => g.ToList());
 
-        // One pass in resolution order, not one per scope: the copy Windows actually resolves is
-        // the first across both scopes, and the later one is the redundant entry. Walking each
-        // scope separately meant a folder listed in both was never marked duplicate at all.
-        ApplyEntryDiagnostics(allEntries, byNormalized);
+        // One pass across both scopes, not one per scope: walking each separately meant a folder
+        // listed in both was never marked duplicate at all.
+        ApplyEntryDiagnostics(allEntries);
 
         ApplyShadowFlags(allEntries);
     }
@@ -88,9 +88,13 @@ public class OrphanDetectionService
         }
     }
 
-    private void ApplyEntryDiagnostics(IReadOnlyList<PathEntry> entriesInResolutionOrder, Dictionary<string, List<PathEntry>> byNormalized)
+    private void ApplyEntryDiagnostics(IReadOnlyList<PathEntry> entriesInResolutionOrder)
     {
-        var seenNormalized = new HashSet<string>();
+        _identities.Clear();
+
+        // Entries already seen, in resolution order. The first copy of a folder is the one
+        // Windows resolves; anything later that reaches the same place is the redundant one.
+        var earlier = new List<PathEntry>();
 
         foreach (var entry in entriesInResolutionOrder)
         {
@@ -101,9 +105,10 @@ public class OrphanDetectionService
 
             entry.ExistenceStatus = Validate(entry);
 
-            var normalized = Normalize(entry.RawToken);
-            if (!seenNormalized.Add(normalized))
-                entry.Diagnostics.Add(DuplicateDiagnostic(entry, byNormalized[normalized]));
+            if (FindDuplicate(entry, earlier) is { } duplicate)
+                entry.Diagnostics.Add(duplicate);
+
+            earlier.Add(entry);
 
             // Auto-selection is decided by what is wrong, not by how sure we are. One unsafe
             // finding vetoes the entry, so a duplicate whose variable also failed to expand is
@@ -111,6 +116,96 @@ public class OrphanDetectionService
             entry.IsChecked = entry.IsAutoSelectable;
         }
     }
+
+    /// <summary>
+    /// Finds the earlier entry this one duplicates, and how certain that duplication is.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Levels are assigned most-specific-first, so each entry gets exactly one: an exact textual
+    /// match is L1 and is never also reported as L2, L3 or L4.
+    /// </para>
+    /// <para>
+    /// The three textual levels are free — they compare fields the entry already derives. Only
+    /// L4 touches disk, and only for entries no textual level matched, so the common case costs
+    /// nothing extra.
+    /// </para>
+    /// </remarks>
+    private Diagnostic? FindDuplicate(PathEntry entry, IReadOnlyList<PathEntry> earlier)
+    {
+        // An empty token names nothing, so there is nothing for it to duplicate.
+        if (entry.Has(DiagnosticKind.EmptyToken))
+            return null;
+
+        // L1 — the identical token, character for character. This holds even when the token does
+        // not resolve: listing the same broken entry twice is still listing it twice.
+        var match = earlier.FirstOrDefault(e =>
+            string.Equals(e.RawToken, entry.RawToken, StringComparison.Ordinal));
+        if (match is not null)
+            return new Diagnostic(DiagnosticKind.DuplicateL1, Severity.Warning,
+                $"Duplicate entry{Where(entry, match)}");
+
+        // Past L1, every level claims two tokens reach the same folder — which cannot be judged
+        // when the token does not resolve to one. An undefined variable might expand to anything.
+        if (entry.Has(DiagnosticKind.UnresolvedVariable))
+            return null;
+
+        // L2 — the same token written differently: case, or a trailing separator. Compared
+        // BEFORE expansion, because %JAVA_HOME%\bin and C:\jdk\bin fold to the same key once
+        // expanded, and calling that L2 would auto-check a pair that belongs to L3.
+        match = earlier.FirstOrDefault(e =>
+            string.Equals(e.ComparisonKey, entry.ComparisonKey, StringComparison.Ordinal));
+        if (match is not null)
+            return new Diagnostic(DiagnosticKind.DuplicateL2, Severity.Warning,
+                $"Duplicate — same folder, written differently{Where(entry, match)}");
+
+        // L3 — two tokens that expand to the same folder today but are maintained separately,
+        // such as %JAVA_HOME%\bin beside C:\jdk\bin. Removing one is legitimate, but doing it
+        // silently is not: whichever survives may stop tracking the variable the other followed.
+        match = earlier.FirstOrDefault(e =>
+            !e.Has(DiagnosticKind.UnresolvedVariable)
+            && string.Equals(e.ExpandedValue.TrimEnd('\\', '/'), entry.ExpandedValue.TrimEnd('\\', '/'),
+                StringComparison.OrdinalIgnoreCase));
+        if (match is not null)
+            return new Diagnostic(DiagnosticKind.DuplicateL3, Severity.Warning,
+                $"'{entry.ParsedValue}' and '{match.ParsedValue}' point to the same folder today, but are " +
+                "written differently. Removing one means the other no longer follows changes to the variable.");
+
+        // L4 — different paths that the filesystem says are the same directory: a junction, an
+        // 8.3 short name, a subst drive. Advisory only; nothing here is auto-removed.
+        return FindIdentityDuplicate(entry, earlier);
+    }
+
+    private Diagnostic? FindIdentityDuplicate(PathEntry entry, IReadOnlyList<PathEntry> earlier)
+    {
+        if (entry.ExistenceStatus != ExistenceStatus.Exists)
+            return null;
+
+        var identity = _identities.Resolve(entry.ExpandedValue);
+        if (identity is null)
+            return null;
+
+        foreach (var candidate in earlier)
+        {
+            if (candidate.ExistenceStatus != ExistenceStatus.Exists)
+                continue;
+
+            var other = _identities.Resolve(candidate.ExpandedValue);
+            if (other is null || !identity.SameObjectAs(other))
+                continue;
+
+            var mechanism = DirectoryIdentityService.DescribeAlias(entry.ExpandedValue, identity);
+            var via = mechanism is null ? string.Empty : $" (via a {mechanism})";
+
+            return new Diagnostic(DiagnosticKind.DuplicateL4, Severity.Info,
+                $"This is the same folder as '{candidate.ParsedValue}'{via}, reached by a different path.");
+        }
+
+        return null;
+    }
+
+    private static string Where(PathEntry entry, PathEntry match) =>
+        match.Scope == entry.Scope ? string.Empty : $" (also in {match.Scope} PATH)";
 
     /// <summary>Findings that come from the token alone, without touching disk.</summary>
     private static IEnumerable<Diagnostic> ParseDiagnostics(PathEntry entry)
@@ -175,31 +270,6 @@ public class OrphanDetectionService
         return ExistenceStatus.Exists;
     }
 
-    /// <summary>
-    /// Classifies a repeat of an already-seen folder.
-    /// </summary>
-    /// <remarks>
-    /// L1 is the same token twice and L2 differs only by case or a trailing separator — both are
-    /// safe to remove automatically. Anything subtler is left for the duplicate-levels work;
-    /// treating it as L2 here would auto-check entries that are not certainly redundant.
-    /// </remarks>
-    private static Diagnostic DuplicateDiagnostic(PathEntry entry, List<PathEntry> group)
-    {
-        var earlier = group.FirstOrDefault(g => !ReferenceEquals(g, entry));
-        var crossScope = group.Any(g => g.Scope != entry.Scope);
-
-        var where = crossScope
-            ? $" (also in {group.First(g => g.Scope != entry.Scope).Scope} PATH)"
-            : string.Empty;
-
-        var exact = earlier is not null
-            && string.Equals(earlier.RawToken, entry.RawToken, StringComparison.Ordinal);
-
-        return exact
-            ? new Diagnostic(DiagnosticKind.DuplicateL1, Severity.Warning, $"Duplicate entry{where}")
-            : new Diagnostic(DiagnosticKind.DuplicateL2, Severity.Warning,
-                $"Duplicate — same folder, written differently{where}");
-    }
 
     /// <summary>
     /// Lists a folder's files, or returns <c>null</c> when it exists but cannot be read.
