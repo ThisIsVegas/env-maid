@@ -66,6 +66,29 @@ public partial class PathEntry : ObservableObject
     /// </remarks>
     public string ComparisonKey => Fold(ParsedValue);
 
+    /// <summary>
+    /// The directories this one token actually contributes to the search path.
+    /// </summary>
+    /// <remarks>
+    /// Usually one. A variable holding <c>C:\a;C:\b</c> contributes two, because the environment
+    /// builder expands the value while constructing the block and consumers then split on
+    /// <c>;</c> — so a multi-directory token is supported by Windows, not malformed. Expansion is
+    /// single-pass, so this count is final: a token cannot expand into text that expands again
+    /// into further separators.
+    /// </remarks>
+    public IReadOnlyList<string> EffectiveDirectories => ExpandedValue
+        .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    /// <summary>
+    /// True when this token resolves to more than one directory, so it has no single identity.
+    /// </summary>
+    /// <remarks>
+    /// Maintenance commands refuse to rewrite these — canonicalizing <c>a;b</c> as a path is
+    /// meaningless — while analysis expands them, because those directories really are on the
+    /// search path and can really shadow something.
+    /// </remarks>
+    public bool IsStructurallyAmbiguous => EffectiveDirectories.Count > 1;
+
     /// <summary>What the grid shows.</summary>
     public string DisplayValue => ParsedValue;
 

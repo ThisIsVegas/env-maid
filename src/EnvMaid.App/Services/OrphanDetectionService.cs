@@ -22,15 +22,18 @@ public class OrphanDetectionService
     private readonly ConflictRanker _ranker;
     private readonly PathExtService _pathExt;
     private readonly DirectoryIdentityService _identities;
+    private readonly LongPathSupport _longPaths;
 
     public OrphanDetectionService(
         ConflictRanker ranker,
         PathExtService? pathExt = null,
-        DirectoryIdentityService? identities = null)
+        DirectoryIdentityService? identities = null,
+        LongPathSupport? longPaths = null)
     {
         _ranker = ranker;
         _pathExt = pathExt ?? new PathExtService();
         _identities = identities ?? new DirectoryIdentityService();
+        _longPaths = longPaths ?? new LongPathSupport();
     }
 
     public void Analyze(IReadOnlyList<PathEntry> userEntries, IReadOnlyList<PathEntry> systemEntries)
@@ -53,32 +56,38 @@ public class OrphanDetectionService
 
         foreach (var entry in resolutionOrderEntries)
         {
-            var expanded = entry.ExpandedValue;
-            if (!Directory.Exists(expanded))
-                continue;
-
-            var files = TryEnumerateFiles(expanded);
-            if (files is null)
-                continue;
-
-            var normalizedFolder = Normalize(entry.RawToken);
-
             entry.ShadowConflicts.Clear();
-            foreach (var (command, file) in WinnersPerCommand(files))
+
+            // Analysis expands an ambiguous token rather than refusing it: those directories are
+            // genuinely on the search path and can genuinely shadow something. Only the
+            // maintenance commands refuse, because rewriting the token is what has no meaning.
+            foreach (var directory in entry.EffectiveDirectories)
             {
-                var name = Path.GetFileName(file);
-                if (seenCommands.TryGetValue(command, out var first))
+                if (!Directory.Exists(directory))
+                    continue;
+
+                var files = TryEnumerateFiles(directory);
+                if (files is null)
+                    continue;
+
+                var normalizedFolder = directory.TrimEnd('\\').ToLowerInvariant();
+
+                foreach (var (command, file) in WinnersPerCommand(files))
                 {
-                    if (!string.Equals(first.Normalized, normalizedFolder, StringComparison.OrdinalIgnoreCase)
-                        && !entry.ShadowConflicts.Any(c => c.ExeName == name))
+                    var name = Path.GetFileName(file);
+                    if (seenCommands.TryGetValue(command, out var first))
                     {
-                        var confidence = _ranker.Rank(name, first.WinnerFile, file);
-                        entry.ShadowConflicts.Add(new ShadowConflict(name, first.Display, confidence));
+                        if (!string.Equals(first.Normalized, normalizedFolder, StringComparison.OrdinalIgnoreCase)
+                            && !entry.ShadowConflicts.Any(c => c.ExeName == name))
+                        {
+                            var confidence = _ranker.Rank(name, first.WinnerFile, file);
+                            entry.ShadowConflicts.Add(new ShadowConflict(name, first.Display, confidence));
+                        }
                     }
-                }
-                else
-                {
-                    seenCommands[command] = (normalizedFolder, expanded, file);
+                    else
+                    {
+                        seenCommands[command] = (normalizedFolder, directory, file);
+                    }
                 }
             }
 
@@ -137,6 +146,12 @@ public class OrphanDetectionService
         if (entry.Has(DiagnosticKind.EmptyToken))
             return null;
 
+        // A token contributing several directories has no single identity to compare, and the
+        // exclusion is total rather than just from auto-removal: L4 would open the joined string
+        // as a path, fail, and read as "not a duplicate" for entirely the wrong reason.
+        if (entry.IsStructurallyAmbiguous)
+            return null;
+
         // L1 — the identical token, character for character. This holds even when the token does
         // not resolve: listing the same broken entry twice is still listing it twice.
         var match = earlier.FirstOrDefault(e =>
@@ -187,7 +202,7 @@ public class OrphanDetectionService
 
         foreach (var candidate in earlier)
         {
-            if (candidate.ExistenceStatus != ExistenceStatus.Exists)
+            if (candidate.ExistenceStatus != ExistenceStatus.Exists || candidate.IsStructurallyAmbiguous)
                 continue;
 
             var other = _identities.Resolve(candidate.ExpandedValue);
@@ -228,46 +243,120 @@ public class OrphanDetectionService
                 "Stored with surrounding quotes.");
     }
 
-    /// <summary>Findings that need the filesystem, and the resulting existence status.</summary>
+    /// <summary>
+    /// Findings that need the filesystem, and the resulting existence status.
+    /// </summary>
+    /// <remarks>
+    /// Runs per <em>effective directory</em>, not on the whole expanded token. A token
+    /// contributing two directories used to be handed to <c>Directory.Exists</c> whole, which
+    /// always failed — so a perfectly working multi-directory variable was flagged as a missing
+    /// folder and arrived pre-checked for deletion.
+    /// </remarks>
     private ExistenceStatus Validate(PathEntry entry)
     {
         if (entry.Has(DiagnosticKind.EmptyToken))
             return ExistenceStatus.Unknown;
 
-        var expanded = entry.ExpandedValue;
-
         // An unexpanded %VAR% means the variable is not defined — which is a different problem
         // from a deleted folder, and has a different fix. Reporting it as missing would point the
         // user at deleting an entry when what they need is to define the variable.
-        if (expanded.Contains('%') && entry.ParsedValue.Contains('%'))
+        if (entry.ExpandedValue.Contains('%') && entry.ParsedValue.Contains('%'))
         {
             entry.Diagnostics.Add(new Diagnostic(DiagnosticKind.UnresolvedVariable, Severity.Warning,
                 "This entry refers to a variable that is not defined, so Windows cannot resolve it."));
             return ExistenceStatus.Unknown;
         }
 
-        if (!Directory.Exists(expanded))
+        var directories = entry.EffectiveDirectories;
+
+        if (entry.IsStructurallyAmbiguous)
+            entry.Diagnostics.Add(new Diagnostic(DiagnosticKind.StructurallyAmbiguous, Severity.Info,
+                $"This single entry contributes {directories.Count} directories to the search path. " +
+                "Windows supports this, but EnvMaid will not rewrite it automatically."));
+
+        AddLongPathDiagnostics(entry, directories);
+
+        var statuses = directories.Select(CheckDirectory).ToList();
+        if (statuses.Count == 0)
+            return ExistenceStatus.Unknown;
+
+        // For an ambiguous token the status is the aggregate, so "one of the two is missing" is
+        // expressible rather than collapsing to a single yes or no.
+        if (statuses.All(s => s == ExistenceStatus.Exists))
+        {
+            AddNoExecutablesIfApplicable(entry, directories);
+            return ExistenceStatus.Exists;
+        }
+
+        if (statuses.All(s => s == ExistenceStatus.Missing))
         {
             entry.Diagnostics.Add(new Diagnostic(DiagnosticKind.FolderMissing, Severity.Error,
-                "Folder does not exist"));
+                directories.Count == 1 ? "Folder does not exist" : "None of these folders exist"));
             return ExistenceStatus.Missing;
         }
 
-        var files = TryEnumerateFiles(expanded);
-        if (files is null)
+        if (statuses.Any(s => s == ExistenceStatus.Missing))
         {
-            // The folder is there but we are not allowed to list it. Reporting "no executables"
-            // would invite the user to delete a folder that may be full of them.
-            entry.Diagnostics.Add(new Diagnostic(DiagnosticKind.FolderInaccessible, Severity.Info,
-                "Folder exists but could not be read"));
-            return ExistenceStatus.Inaccessible;
+            var missing = directories.Where(d => CheckDirectory(d) == ExistenceStatus.Missing).ToList();
+            entry.Diagnostics.Add(new Diagnostic(DiagnosticKind.FolderMissing, Severity.Warning,
+                $"{missing.Count} of {directories.Count} folders in this entry do not exist: " +
+                string.Join(", ", missing)));
+            return ExistenceStatus.Unknown;
         }
 
-        if (!files.Any(f => ExecutableExtensions.Contains(Path.GetExtension(f))))
+        // Nothing missing, so what is left is at least one folder we cannot read.
+        entry.Diagnostics.Add(new Diagnostic(DiagnosticKind.FolderInaccessible, Severity.Info,
+            directories.Count == 1
+                ? "Folder exists but could not be read"
+                : "Some of these folders exist but could not be read"));
+        return ExistenceStatus.Inaccessible;
+    }
+
+    private static ExistenceStatus CheckDirectory(string directory)
+    {
+        if (!Directory.Exists(directory))
+            return ExistenceStatus.Missing;
+
+        return TryEnumerateFiles(directory) is null
+            ? ExistenceStatus.Inaccessible
+            : ExistenceStatus.Exists;
+    }
+
+    private static void AddNoExecutablesIfApplicable(PathEntry entry, IReadOnlyList<string> directories)
+    {
+        // "Nothing here looks useful" only holds when it holds for every directory the entry
+        // contributes — one useful folder is reason enough to keep the entry.
+        var anyExecutable = directories
+            .Select(TryEnumerateFiles)
+            .Where(files => files is not null)
+            .SelectMany(files => files!)
+            .Any(file => ExecutableExtensions.Contains(Path.GetExtension(file)));
+
+        if (!anyExecutable)
             entry.Diagnostics.Add(new Diagnostic(DiagnosticKind.NoExecutables, Severity.Info,
                 "No executable-type files found"));
+    }
 
-        return ExistenceStatus.Exists;
+    /// <summary>
+    /// Flags effective directories past <c>MAX_PATH</c>.
+    /// </summary>
+    /// <remarks>
+    /// Measured on the expanded directory, not the raw token: a short <c>%VAR%</c> can expand
+    /// well past the limit. Never auto-selected — a long path is usually a working directory.
+    /// </remarks>
+    private void AddLongPathDiagnostics(PathEntry entry, IReadOnlyList<string> directories)
+    {
+        var tooLong = directories.Where(d => d.Length > LongPathSupport.MaxPath).ToList();
+        if (tooLong.Count == 0)
+            return;
+
+        entry.Diagnostics.Add(_longPaths.IsEnabled
+            ? new Diagnostic(DiagnosticKind.ExceedsMaxPath, Severity.Info,
+                $"Longer than {LongPathSupport.MaxPath} characters. Long paths are enabled on this " +
+                "machine, though some older tools may still fail to use it.")
+            : new Diagnostic(DiagnosticKind.ExceedsMaxPath, Severity.Warning,
+                $"Longer than the {LongPathSupport.MaxPath}-character limit, and long path support " +
+                "is not enabled on this machine. Some programs may not find files here."));
     }
 
 

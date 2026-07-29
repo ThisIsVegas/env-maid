@@ -216,6 +216,9 @@ public partial class PathListViewModel : ObservableObject
     private void Normalize()
     {
         var candidates = Entries
+            // Canonicalizing "a;b" as a single path is meaningless, so a token contributing
+            // several directories is left exactly as the user wrote it.
+            .Where(entry => !entry.IsStructurallyAmbiguous)
             .Select(entry => (Entry: entry, After: _normalizer.Normalize(entry.RawToken)))
             .Where(item => item.After != item.Entry.RawToken)
             .ToList();
@@ -350,6 +353,9 @@ public partial class PathListViewModel : ObservableObject
     private void Compress()
     {
         var candidates = Entries
+            // Folding a variable into a multi-directory token could change how many directories
+            // it contributes, which is not a change a compression pass should make.
+            .Where(entry => !entry.IsStructurallyAmbiguous)
             .Select(entry => (Entry: entry, After: _compressor.Compress(entry.RawToken)))
             .Where(item => item.After != item.Entry.RawToken)
             .ToList();

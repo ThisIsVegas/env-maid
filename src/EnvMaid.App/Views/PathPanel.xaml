@@ -228,6 +228,36 @@
                 <DataGrid.RowDetailsTemplate>
                     <DataTemplate>
                         <StackPanel>
+                            <!-- One row per stored token, always: the token is the editable
+                                 unit, and splitting it into N rows would imply N independently
+                                 editable things, which the stored value cannot express. The
+                                 directories it contributes are shown beneath it instead. -->
+                            <Border Background="#16191F"
+                                    BorderBrush="{StaticResource DividerBrush}"
+                                    BorderThickness="0,1,0,1"
+                                    Padding="12,8"
+                                    Visibility="{Binding IsStructurallyAmbiguous, Converter={StaticResource BoolToVis}}">
+                                <StackPanel>
+                                    <TextBlock Foreground="{StaticResource MutedTextBrush}"
+                                               FontSize="11"
+                                               FontWeight="SemiBold">
+                                        <Run Text="This entry adds"/>
+                                        <Run Text="{Binding EffectiveDirectories.Count, Mode=OneWay}"/>
+                                        <Run Text="directories"/>
+                                    </TextBlock>
+                                    <ItemsControl ItemsSource="{Binding EffectiveDirectories}" Margin="0,4,0,0">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding}"
+                                                           FontFamily="Cascadia Mono"
+                                                           FontSize="12"
+                                                           TextWrapping="Wrap"
+                                                           Margin="8,1,0,1"/>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Border>
                             <Border Background="#1E1A14"
                                     BorderBrush="{StaticResource AttentionBrush}"
                                     BorderThickness="0,1,0,1"
