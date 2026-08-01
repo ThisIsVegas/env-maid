@@ -36,11 +36,16 @@ EnvMaid gives you a simple health summary first and keeps the complete PATH edit
 | Finding | What it means |
 | --- | --- |
 | Missing locations | The folder no longer exists or the entry is empty |
-| Duplicate entries | The same location appears more than once |
+| Cannot read | The folder is there, but EnvMaid was not allowed to list it |
+| Undefined variable | The entry uses a `%VARIABLE%` that is not defined, so Windows cannot resolve it |
+| Duplicate entries | The same location appears more than once, reported at four levels of certainty |
 | No executables | A folder does not contain a supported executable file |
 | Command priority | More than one folder provides the same command, so Windows uses the first match |
 
-Findings include a reason and confidence level so you can decide what deserves action.
+Each entry lists every finding that applies to it, with a reason and a severity, so you can decide
+what deserves action. Only findings where removing the entry is clearly the right fix are
+pre-selected for you — an undefined variable is fixed by defining the variable, and a folder that
+two entries reach by different routes may be deliberate.
 
 ### A safe workflow
 
@@ -52,8 +57,16 @@ Findings include a reason and confidence level so you can decide what deserves a
 
 Changes remain staged inside EnvMaid until you confirm the final save. Before writing, EnvMaid creates a JSON backup and then notifies Windows of the updated environment settings.
 
+If your PATH changed outside EnvMaid since the scan — an installer is the usual cause — EnvMaid
+notices before writing and shows you both sets of changes rather than overwriting silently. Each
+scope is handled on its own, so a surprise in one does not block the other.
+
 > [!IMPORTANT]
 > Saving System PATH changes requires administrator approval. User PATH changes do not.
+
+> [!NOTE]
+> Already-running programs keep the PATH they started with, permanently. Restart them to pick up
+> your changes.
 
 ### More tools
 
@@ -68,7 +81,12 @@ The **More** menu keeps occasional actions out of the main workflow:
 
 Windows searches System PATH before User PATH. Within each scope, entries are searched from top to bottom. If several folders contain a command with the same name, the first copy wins and later copies are shadowed.
 
-EnvMaid models this order when identifying conflicts and shows what command coverage would be lost before a conflicting location is removed.
+The search is folder-by-folder: every extension in `PATHEXT` is tried in one folder before moving
+to the next. So an earlier folder wins regardless of extension, and within a single folder the
+`PATHEXT` order decides — which is why `foo.bat` and `foo.exe` are not unrelated files, but two
+candidates for the command `foo`, only one of which ever runs.
+
+EnvMaid models this order when identifying conflicts and shows what command coverage would be lost before a conflicting location is removed. Because resolution differs by launch mechanism, the Conflicts view states which one it simulates: a command typed at a shell prompt.
 </details>
 
 ### Install and requirements
@@ -130,16 +148,22 @@ dotnet test src/EnvMaid.App.Tests/EnvMaid.App.Tests.csproj `
 
 | Area | Responsibility |
 | --- | --- |
-| `Models` | PATH entries, flags, conflicts, and maintenance previews |
-| `Services` | Environment access, normalization, analysis, ranking, diffs, and backups |
+| `Models` | PATH entries, diagnostics, conflicts, elevation intent, and maintenance previews |
+| `Services` | Registry storage, PATH semantics, analysis, ranking, diffs, and backups |
+| `Services/Interop` | The P/Invoke layer, kept behind the storage seam |
 | `ViewModels` | Staged editing, commands, dashboard state, and confirmation seams |
 | `Views` | WPF screens and dialogs |
 | `Resources` | Built-in CLI-tool knowledge used to rank command conflicts |
 | `EnvMaid.App.Tests` | Pure service and view-model tests |
 
+Storage is layered so each level can be faked from above: `EnvironmentVariableStore` is the only
+class that touches the registry, `EnvironmentPathService` adds PATH semantics on top of it, and the
+view models see only the latter.
+
 Two analysis paths share the same Windows resolution model:
 
-- Per-entry analysis flags missing, empty, executable-free, and duplicate entries.
+- Per-entry analysis attaches a list of diagnostics — missing, inaccessible, empty, unresolved
+  variable, executable-free, structurally ambiguous, and four levels of duplicate.
 - Grouped conflict analysis identifies the winning and shadowed providers for each command.
 
 Both must preserve `System entries → User entries` ordering and use `ConflictRanker` as the single source of confidence ranking.
@@ -147,12 +171,25 @@ Both must preserve `System entries → User entries` ordering and use `ConflictR
 ### Important implementation behavior
 
 - Editing is staged in observable collections; the environment is untouched until save.
-- Save computes a diff, asks for confirmation, creates a backup, writes the changes, and broadcasts `WM_SETTINGCHANGE`.
-- System PATH writes run directly when already elevated or relaunch a small elevated helper.
-- Path equality is case-insensitive and based on expanded, normalized paths.
+- Save computes a diff, asks for confirmation, backs up the values actually being replaced, verifies
+  the stored value has not changed since the scan, writes, checks the read-back, and broadcasts
+  `WM_SETTINGCHANGE` once for the whole save.
+- A `PathEntry` stores only its raw token and derives every other form, so an untouched entry
+  round-trips to the registry byte for byte and `REG_EXPAND_SZ` is never downgraded to `REG_SZ`.
+- System PATH writes run in-process when already elevated; otherwise an elevated helper receives an
+  ACL-protected intent file describing the baseline and the operations, then re-reads, verifies, and
+  writes entirely inside the privilege boundary. The joined PATH never goes on a command line.
+- Path equality is case-insensitive and normalized, and comparisons deliberately choose the expanded
+  or unexpanded form — that choice is what distinguishes a true duplicate from two separately
+  maintained references to the same folder.
 - The CLI-tool list combines an embedded baseline with user overrides from `%APPDATA%\EnvMaid\cli-tools.txt`.
 
-See [AGENTS.md](AGENTS.md) for the detailed project architecture and coding conventions used by contributors and coding agents.
+[docs/knowledge/](docs/knowledge/) holds the Windows environment-variable specification this code
+implements, including empirical findings that contradict Microsoft's documentation. The `§` markers
+in source comments refer to it.
+
+See [CLAUDE.md](CLAUDE.md) for the detailed project architecture and coding conventions used by
+contributors and coding agents, and [AGENTS.md](AGENTS.md) for the short agent-facing brief.
 
 ### Contributing
 
