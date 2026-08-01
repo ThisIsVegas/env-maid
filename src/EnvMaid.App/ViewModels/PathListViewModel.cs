@@ -1,15 +1,26 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
+using System.IO;
+using System.Windows;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using EnvMaid.App.Models;
+using EnvMaid.App.Services;
 
 namespace EnvMaid.App.ViewModels;
 
 public partial class PathListViewModel : ObservableObject
 {
-    private const int PathLimit = 2047;
-    private const int WarningThreshold = 1800;
+    private readonly PathNormalizer _normalizer;
+    private readonly PathCompressor _compressor;
+    private bool _isLoading;
+    private int _changeBatchDepth;
+    private bool _hasPendingChangeNotification;
+
+    public Func<MaintenancePreview, bool>? ConfirmMaintenance { get; set; }
+
+    public event EventHandler? EntriesChanged;
 
     public PathScope Scope { get; }
 
@@ -19,10 +30,16 @@ public partial class PathListViewModel : ObservableObject
     private PathEntry? _selectedEntry;
 
     [ObservableProperty]
+    private bool _isBulkSelectionMode;
+
+    [ObservableProperty]
     private int _totalLength;
 
     [ObservableProperty]
-    private string _lengthLabel = "Length: 0 / 2047";
+    private string _lengthLabel = "Length: 0 characters";
+
+    [ObservableProperty]
+    private bool _lengthOverLimit;
 
     private static readonly SolidColorBrush GreenBrush = new(Color.FromRgb(0xA6, 0xE3, 0xA1));
     private static readonly SolidColorBrush OrangeBrush = new(Color.FromRgb(0xFA, 0xB3, 0x87));
@@ -32,35 +49,352 @@ public partial class PathListViewModel : ObservableObject
     private Brush _barColor = GreenBrush;
 
     public PathListViewModel(PathScope scope)
+        : this(scope, new PathNormalizer(), new PathCompressor())
+    {
+    }
+
+    public PathListViewModel(PathScope scope, PathNormalizer normalizer, PathCompressor compressor)
     {
         Scope = scope;
-        Entries.CollectionChanged += (_, _) => RecalculateLength();
+        _normalizer = normalizer;
+        _compressor = compressor;
+        Entries.CollectionChanged += (_, _) =>
+        {
+            RecalculateLength();
+            NotifyEntriesChanged();
+        };
     }
 
     public void LoadEntries(IEnumerable<string> paths)
     {
-        Entries.Clear();
-        foreach (var p in paths)
-            Entries.Add(new PathEntry(p, Scope));
-
-        foreach (var entry in Entries)
-            entry.PropertyChanged += (_, _) => RecalculateLength();
+        _isLoading = true;
+        try
+        {
+            Entries.Clear();
+            foreach (var path in paths)
+            {
+                Entries.Add(CreateEntry(path));
+            }
+        }
+        finally
+        {
+            _isLoading = false;
+        }
 
         RecalculateLength();
+        EntriesChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    private void Entry_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(PathEntry.RawToken))
+            return;
+
+        RecalculateLength();
+        NotifyEntriesChanged();
+    }
+
+    private PathEntry CreateEntry(string path)
+    {
+        var entry = new PathEntry(path, Scope);
+        entry.PropertyChanged += Entry_PropertyChanged;
+        return entry;
+    }
+
+    private void NotifyEntriesChanged()
+    {
+        if (_isLoading)
+            return;
+        if (_changeBatchDepth > 0)
+        {
+            _hasPendingChangeNotification = true;
+            return;
+        }
+
+        EntriesChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void RunChangeBatch(Action action)
+    {
+        _changeBatchDepth++;
+        try
+        {
+            action();
+        }
+        finally
+        {
+            _changeBatchDepth--;
+            if (_changeBatchDepth == 0 && _hasPendingChangeNotification)
+            {
+                _hasPendingChangeNotification = false;
+                EntriesChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Recomputes the scope readout and the two per-entry length markers.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The caution boundary is not a ceiling — nothing is truncated there, and editing past it in
+    /// EnvMaid is fine. It marks where <em>other</em> PATH-writing tools start mishandling the
+    /// value, which is what a user who also edits PATH from PowerShell needs to know.
+    /// </para>
+    /// <para>
+    /// Colour is reserved for the band that actually blocks a save. A PATH in the caution band is
+    /// common and permanent on many machines; a warning that is always on gets tuned out.
+    /// </para>
+    /// </remarks>
     public void RecalculateLength()
     {
-        TotalLength = string.Join(';', Entries.Select(e => e.Path)).Length;
-        LengthLabel = $"Length: {TotalLength} / {PathLimit}";
-        BarColor = TotalLength >= PathLimit ? RedBrush : TotalLength >= WarningThreshold ? OrangeBrush : GreenBrush;
+        TotalLength = string.Join(';', Entries.Select(e => e.RawToken)).Length;
+        var band = PathLengthLimits.BandFor(TotalLength);
+
+        LengthLabel = $"Length: {TotalLength:N0} characters";
+        LengthOverLimit = band == PathLengthBand.TooLong;
+        BarColor = band switch
+        {
+            PathLengthBand.TooLong => RedBrush,
+            PathLengthBand.Caution => OrangeBrush,
+            _ => GreenBrush,
+        };
+
+        var cumulative = 0;
+        PathEntry? lastBeforeCaution = null;
+        PathEntry? lastBeforeHardLimit = null;
+
+        foreach (var entry in Entries)
+        {
+            entry.IsLengthLimitBoundary = false;
+            entry.IsWriteLimitBoundary = false;
+
+            var before = cumulative;
+            cumulative += entry.RawToken.Length;
+
+            entry.IsPastLengthLimit = cumulative > PathLengthLimits.CautionThreshold;
+            entry.IsPastWriteLimit = cumulative > PathLengthLimits.HardMaximum;
+
+            if (before <= PathLengthLimits.CautionThreshold && !entry.IsPastLengthLimit)
+                lastBeforeCaution = entry;
+            if (before <= PathLengthLimits.HardMaximum && !entry.IsPastWriteLimit)
+                lastBeforeHardLimit = entry;
+
+            cumulative += 1; // separator
+        }
+
+        if (lastBeforeCaution is not null && Entries.Any(e => e.IsPastLengthLimit))
+            lastBeforeCaution.IsLengthLimitBoundary = true;
+
+        if (lastBeforeHardLimit is not null && Entries.Any(e => e.IsPastWriteLimit))
+            lastBeforeHardLimit.IsWriteLimitBoundary = true;
     }
 
     [RelayCommand]
     private void RemoveChecked()
     {
-        foreach (var entry in Entries.Where(e => e.IsChecked).ToList())
-            Entries.Remove(entry);
+        RunChangeBatch(() =>
+        {
+            foreach (var entry in Entries.Where(e => e.IsChecked).ToList())
+                Entries.Remove(entry);
+        });
+        IsBulkSelectionMode = false;
+    }
+
+    [RelayCommand]
+    private void ToggleBulkSelection()
+    {
+        IsBulkSelectionMode = !IsBulkSelectionMode;
+        if (!IsBulkSelectionMode)
+            foreach (var entry in Entries)
+                entry.IsChecked = false;
+    }
+
+    /// <summary>Rewrite every entry to its canonical form (trailing slash / redundant
+    /// segments), leaving %VAR% references intact. Staged only — committed on Save.</summary>
+    [RelayCommand]
+    private void Normalize()
+    {
+        var candidates = Entries
+            // Canonicalizing "a;b" as a single path is meaningless, so a token contributing
+            // several directories is left exactly as the user wrote it.
+            .Where(entry => !entry.IsStructurallyAmbiguous)
+            .Select(entry => (Entry: entry, After: _normalizer.Normalize(entry.RawToken)))
+            .Where(item => item.After != item.Entry.RawToken)
+            .ToList();
+        var changes = candidates
+            .Select(item => new MaintenanceChange(
+                MaintenanceChangeKind.Change,
+                item.Entry.RawToken,
+                item.After,
+                "The location resolves to the same folder."))
+            .ToList();
+        var operations = candidates.Zip(changes).ToList();
+
+        var preview = new MaintenancePreview(
+            Scope,
+            $"Normalize {changes.Count} PATH {(changes.Count == 1 ? "entry" : "entries")}?",
+            changes.Count == 0
+                ? "Every entry is already normalized."
+                : "These changes alter how paths are written, not which folders they resolve to.",
+            $"Stage {changes.Count} {(changes.Count == 1 ? "change" : "changes")}",
+            changes);
+        if (!Confirm(preview))
+            return;
+
+        RunChangeBatch(() =>
+        {
+            foreach (var operation in operations.Where(operation => operation.Second.IsSelected))
+                operation.First.Entry.RawToken = operation.First.After;
+        });
+    }
+
+    /// <summary>Remove entries that repeat an earlier one in THIS scope (first kept),
+    /// comparing by canonical form so trailing-slash/case variants collapse together.</summary>
+    [RelayCommand]
+    private void RemoveDuplicates()
+    {
+        // Driven by the diagnostics the analysis already assigned, rather than re-deriving a
+        // single "same folder" bucket here. That bucket could not tell an exact repeat from two
+        // separately-maintained references to one folder, and pre-checked both.
+        var duplicates = new List<(PathEntry Entry, MaintenanceChange Change)>();
+        var changes = new List<MaintenanceChange>();
+
+        foreach (var entry in Entries)
+        {
+            var kind = DuplicateKindOf(entry);
+
+            // L4 is advisory: a junction or subst alias is reported on the grid, but it is not
+            // offered for bulk removal, because the two paths may exist deliberately.
+            if (kind is null or DiagnosticKind.DuplicateL4)
+                continue;
+
+            var certain = kind is DiagnosticKind.DuplicateL1 or DiagnosticKind.DuplicateL2;
+
+            var change = new MaintenanceChange(
+                MaintenanceChangeKind.Remove,
+                entry.RawToken,
+                null,
+                entry.Diagnostics.First(d => d.Kind == kind).Message,
+                isSelected: certain);
+
+            duplicates.Add((entry, change));
+            changes.Add(change);
+        }
+
+        var needsReview = changes.Count(c => !c.IsSelected);
+        var preview = new MaintenancePreview(
+            Scope,
+            $"Remove {changes.Count} duplicate {(changes.Count == 1 ? "entry" : "entries")}?",
+            changes.Count == 0
+                ? "No duplicate entries were found."
+                : needsReview == 0
+                    ? "The first occurrence of each location will be kept."
+                    : $"The first occurrence of each location will be kept. {needsReview} " +
+                      $"{(needsReview == 1 ? "entry is" : "entries are")} unchecked because removing " +
+                      "them changes how the remaining entry tracks its variable.",
+            "Stage removals",
+            changes);
+        if (!Confirm(preview))
+            return;
+
+        RunChangeBatch(() =>
+        {
+            foreach (var item in duplicates.Where(item => item.Change.IsSelected))
+                Entries.Remove(item.Entry);
+        });
+    }
+
+    /// <summary>Which duplicate level this entry carries, if any.</summary>
+    private static DiagnosticKind? DuplicateKindOf(PathEntry entry) => entry.Diagnostics
+        .Where(d => d.Kind is DiagnosticKind.DuplicateL1 or DiagnosticKind.DuplicateL2
+            or DiagnosticKind.DuplicateL3 or DiagnosticKind.DuplicateL4)
+        .Select(d => (DiagnosticKind?)d.Kind)
+        .FirstOrDefault();
+
+    /// <summary>Remove entries whose folder is missing or empty (the High-confidence
+    /// broken flags). Leaves NoExecutable (Low-confidence) entries alone.</summary>
+    [RelayCommand]
+    private void RemoveBroken()
+    {
+        var candidates = Entries.Where(e => e.IsBroken).ToList();
+        var changes = candidates
+            .Select(entry => new MaintenanceChange(
+                MaintenanceChangeKind.Remove,
+                entry.RawToken,
+                null,
+                entry.Has(DiagnosticKind.EmptyToken)
+                    ? "The entry is empty."
+                    : "The folder no longer exists."))
+            .ToList();
+        var operations = candidates.Zip(changes).ToList();
+
+        var preview = new MaintenancePreview(
+            Scope,
+            $"Remove {changes.Count} missing {(changes.Count == 1 ? "location" : "locations")}?",
+            changes.Count == 0
+                ? "No missing or empty locations were found."
+                : "Only PATH entries will be removed. No files or folders will be deleted.",
+            $"Stage {changes.Count} {(changes.Count == 1 ? "removal" : "removals")}",
+            changes);
+        if (!Confirm(preview))
+            return;
+
+        RunChangeBatch(() =>
+        {
+            foreach (var operation in operations.Where(operation => operation.Second.IsSelected))
+                Entries.Remove(operation.First);
+        });
+    }
+
+    /// <summary>Fold known Windows variables back into literal entries (e.g. %LOCALAPPDATA%)
+    /// to reclaim room under the 2047-character limit. Staged only — committed on Save.</summary>
+    [RelayCommand]
+    private void Compress()
+    {
+        var candidates = Entries
+            // Folding a variable into a multi-directory token could change how many directories
+            // it contributes, which is not a change a compression pass should make.
+            .Where(entry => !entry.IsStructurallyAmbiguous)
+            .Select(entry => (Entry: entry, After: _compressor.Compress(entry.RawToken)))
+            .Where(item => item.After != item.Entry.RawToken)
+            .ToList();
+        var changes = candidates
+            .Select(item => new MaintenanceChange(
+                MaintenanceChangeKind.Change,
+                item.Entry.RawToken,
+                item.After,
+                "The stored value becomes shorter while resolving to the same folder."))
+            .ToList();
+        var operations = candidates.Zip(changes).ToList();
+
+        var preview = new MaintenancePreview(
+            Scope,
+            $"Compress {changes.Count} PATH {(changes.Count == 1 ? "entry" : "entries")}?",
+            changes.Count == 0
+                ? "No entries can be shortened with known environment variables."
+                : "Environment variables will shorten the stored values without changing their locations.",
+            $"Stage {changes.Count} {(changes.Count == 1 ? "change" : "changes")}",
+            changes);
+        if (!Confirm(preview))
+            return;
+
+        RunChangeBatch(() =>
+        {
+            foreach (var operation in operations.Where(operation => operation.Second.IsSelected))
+                operation.First.Entry.RawToken = operation.First.After;
+        });
+    }
+
+    private bool Confirm(MaintenancePreview preview)
+    {
+        if (!preview.HasChanges)
+        {
+            ConfirmMaintenance?.Invoke(preview);
+            return false;
+        }
+
+        return ConfirmMaintenance?.Invoke(preview) ?? true;
     }
 
     [RelayCommand]
@@ -68,16 +402,16 @@ public partial class PathListViewModel : ObservableObject
     {
         var input = PromptForPath("Add Path", string.Empty);
         if (!string.IsNullOrWhiteSpace(input))
-            Entries.Add(new PathEntry(input, Scope));
+            Entries.Add(CreateEntry(input));
     }
 
     [RelayCommand]
     private void Edit()
     {
         if (SelectedEntry is null) return;
-        var input = PromptForPath("Edit Path", SelectedEntry.Path);
+        var input = PromptForPath("Edit Path", SelectedEntry.RawToken);
         if (!string.IsNullOrWhiteSpace(input))
-            SelectedEntry.Path = input;
+            SelectedEntry.RawToken = input;
     }
 
     [RelayCommand]
@@ -100,6 +434,33 @@ public partial class PathListViewModel : ObservableObject
         var newIndex = index + direction;
         if (newIndex < 0 || newIndex >= Entries.Count) return;
         Entries.Move(index, newIndex);
+    }
+
+    [RelayCommand]
+    private void OpenInExplorer(PathEntry? entry)
+    {
+        if (entry is null) return;
+        var expanded = Environment.ExpandEnvironmentVariables(entry.RawToken);
+        if (!Directory.Exists(expanded)) return;
+        Process.Start(new ProcessStartInfo { FileName = expanded, UseShellExecute = true });
+    }
+
+    [RelayCommand]
+    private void CopyPath(PathEntry? entry)
+    {
+        if (entry is null) return;
+        TryCopyToClipboard(entry.RawToken);
+    }
+
+    private static void TryCopyToClipboard(string text)
+    {
+        try
+        {
+            Clipboard.SetText(text);
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+        }
     }
 
     private static string? PromptForPath(string title, string initialValue)

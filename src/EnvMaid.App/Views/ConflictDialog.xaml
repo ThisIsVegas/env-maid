@@ -1,0 +1,87 @@
+<Window x:Class="EnvMaid.App.Views.ConflictDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="PATH changed outside EnvMaid"
+        Width="700"
+        MaxHeight="720"
+        SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        Style="{StaticResource AppWindow}">
+    <DockPanel Margin="24">
+        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,18">
+            <TextBlock x:Name="TitleText" Style="{StaticResource PageTitle}" FontSize="23"/>
+            <TextBlock Text="Something else changed this PATH while you were editing. Choose which version to keep — whichever you pick, a backup is written first."
+                       Style="{StaticResource MutedText}"
+                       TextWrapping="Wrap"
+                       Margin="0,6,0,0"/>
+        </StackPanel>
+
+        <StackPanel DockPanel.Dock="Bottom"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Margin="0,18,0,0">
+            <Button Content="Cancel"
+                    Style="{StaticResource GhostButton}"
+                    Click="Cancel_Click"
+                    Margin="0,0,8,0"
+                    ToolTip="Leave this PATH exactly as it is now."/>
+            <Button Content="Reload theirs"
+                    Style="{StaticResource GhostButton}"
+                    Click="Reload_Click"
+                    Margin="0,0,8,0"
+                    ToolTip="Discard your edits to this PATH and load what is stored now."/>
+            <Button Content="Keep mine"
+                    Style="{StaticResource PrimaryButton}"
+                    Click="Overwrite_Click"
+                    ToolTip="Write your edits over the outside change. The replaced value is kept in the backup."/>
+        </StackPanel>
+
+        <ScrollViewer MaxHeight="480" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <StackPanel Margin="0,0,0,20">
+                    <TextBlock Text="While you were editing (stored now)"
+                               Style="{StaticResource SectionTitle}"/>
+                    <ItemsControl x:Name="ExternalList" Margin="0,8,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding}"
+                                           FontFamily="Cascadia Mono"
+                                           FontSize="12"
+                                           TextWrapping="Wrap"
+                                           Margin="0,2"/>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock x:Name="NoExternalText"
+                               Text="The stored value changed in a way that does not show up as an entry change — for example a trailing separator or a different value type."
+                               Style="{StaticResource MutedText}"
+                               TextWrapping="Wrap"
+                               Visibility="Collapsed"
+                               Margin="0,8,0,0"/>
+                </StackPanel>
+
+                <StackPanel>
+                    <TextBlock Text="Your pending edits" Style="{StaticResource SectionTitle}"/>
+                    <ItemsControl x:Name="PendingList" Margin="0,8,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding}"
+                                           FontFamily="Cascadia Mono"
+                                           FontSize="12"
+                                           TextWrapping="Wrap"
+                                           Margin="0,2"/>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock x:Name="NoPendingText"
+                               Text="You have no pending entry changes for this PATH."
+                               Style="{StaticResource MutedText}"
+                               TextWrapping="Wrap"
+                               Visibility="Collapsed"
+                               Margin="0,8,0,0"/>
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

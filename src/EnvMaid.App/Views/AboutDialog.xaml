@@ -1,0 +1,92 @@
+<Window x:Class="EnvMaid.App.Views.AboutDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="About EnvMaid"
+        Width="520"
+        SizeToContent="Height"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        Icon="../Assets/app_icon.ico"
+        Style="{StaticResource AppWindow}">
+    <Grid Margin="28">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="72"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <Image Source="../Assets/app_icon.ico"
+                   Width="56"
+                   Height="56"
+                   HorizontalAlignment="Left"
+                   VerticalAlignment="Top"/>
+
+            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                <TextBlock Text="EnvMaid"
+                           FontFamily="Segoe UI Variable Display"
+                           FontSize="26"
+                           FontWeight="SemiBold"/>
+                <TextBlock Text="{Binding VersionText}"
+                           Style="{StaticResource MutedText}"
+                           Margin="0,3,0,0"/>
+            </StackPanel>
+        </Grid>
+
+        <TextBlock Grid.Row="1"
+                   Text="Review and manage the Windows PATH with clear findings, staged edits, and a backup before every save."
+                   Foreground="{StaticResource MutedTextBrush}"
+                   TextWrapping="Wrap"
+                   LineHeight="20"
+                   Margin="0,20,0,0"/>
+
+        <Border Grid.Row="2"
+                Style="{StaticResource SurfaceBorder}"
+                Padding="16"
+                Margin="0,22,0,0">
+            <StackPanel>
+                <TextBlock Text="Source code" FontWeight="SemiBold"/>
+                <TextBlock Text="The EnvMaid source is publicly available on GitHub."
+                           Style="{StaticResource MutedText}"
+                           Margin="0,4,0,0"/>
+
+                <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                    <Button Content="View source"
+                            Style="{StaticResource SecondaryButton}"
+                            Click="ViewSource_Click"/>
+                    <Button Content="Report an issue"
+                            Style="{StaticResource GhostButton}"
+                            Click="ReportIssue_Click"
+                            Margin="6,0,0,0"/>
+                </StackPanel>
+
+                <Border BorderBrush="{StaticResource DividerBrush}"
+                        BorderThickness="0,1,0,0"
+                        Margin="0,16,0,14"/>
+
+                <TextBlock Text="License" FontWeight="SemiBold"/>
+                <TextBlock Text="No open-source license has been published for this project yet."
+                           Foreground="{StaticResource AttentionBrush}"
+                           FontSize="12"
+                           TextWrapping="Wrap"
+                           Margin="0,4,0,0"/>
+            </StackPanel>
+        </Border>
+
+        <Button Grid.Row="3"
+                Content="Close"
+                Style="{StaticResource PrimaryButton}"
+                HorizontalAlignment="Right"
+                IsDefault="True"
+                IsCancel="True"
+                Click="Close_Click"
+                Margin="0,20,0,0"/>
+    </Grid>
+</Window>
