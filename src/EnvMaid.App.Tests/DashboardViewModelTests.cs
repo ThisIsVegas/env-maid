@@ -16,8 +16,8 @@ public class DashboardViewModelTests
     {
         var user = new PathListViewModel(PathScope.User);
         var system = new PathListViewModel(PathScope.System);
-        user.Entries.Add(new PathEntry("x", PathScope.User) { Flags = PathFlag.Missing, Confidence = FlagConfidence.High });
-        system.Entries.Add(new PathEntry("", PathScope.System) { Flags = PathFlag.Empty, Confidence = FlagConfidence.High });
+        user.Entries.Add(EntryFactory.Missing("x", PathScope.User));
+        system.Entries.Add(EntryFactory.Empty(PathScope.System));
 
         var vm = new DashboardViewModel(user, system, EmptyConflicts(user, system));
         vm.Refresh();
@@ -42,8 +42,8 @@ public class DashboardViewModelTests
     {
         var user = new PathListViewModel(PathScope.User);
         var system = new PathListViewModel(PathScope.System);
-        user.Entries.Add(new PathEntry("u", PathScope.User) { Flags = PathFlag.Missing, Confidence = FlagConfidence.High });
-        system.Entries.Add(new PathEntry("s", PathScope.System) { Flags = PathFlag.Missing, Confidence = FlagConfidence.High });
+        user.Entries.Add(EntryFactory.Missing("u", PathScope.User));
+        system.Entries.Add(EntryFactory.Missing("s", PathScope.System));
 
         var vm = new DashboardViewModel(user, system, EmptyConflicts(user, system));
         vm.Scope = DashboardScope.User; // triggers Refresh
@@ -56,7 +56,7 @@ public class DashboardViewModelTests
     {
         var user = new PathListViewModel(PathScope.User);
         var system = new PathListViewModel(PathScope.System);
-        user.Entries.Add(new PathEntry("dup", PathScope.User) { Flags = PathFlag.Duplicate, Confidence = FlagConfidence.High });
+        user.Entries.Add(EntryFactory.Duplicate("dup", PathScope.User));
 
         var vm = new DashboardViewModel(user, system, EmptyConflicts(user, system));
         vm.Refresh();
@@ -69,8 +69,8 @@ public class DashboardViewModelTests
     {
         var user = new PathListViewModel(PathScope.User);
         var system = new PathListViewModel(PathScope.System);
-        user.Entries.Add(new PathEntry("gone", PathScope.User) { Flags = PathFlag.Missing });
-        user.Entries.Add(new PathEntry("dup", PathScope.User) { Flags = PathFlag.Duplicate });
+        user.Entries.Add(EntryFactory.Missing("gone", PathScope.User));
+        user.Entries.Add(EntryFactory.Duplicate("dup", PathScope.User));
 
         var vm = new DashboardViewModel(user, system, EmptyConflicts(user, system));
         vm.Refresh();

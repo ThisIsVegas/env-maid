@@ -4,7 +4,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ## What this is
 
-EnvMaid is a Windows WPF (.NET 10, MVVM) desktop tool for cleaning up the Windows PATH environment variable. It scans User and System PATH separately, flags broken/duplicate/orphaned entries, detects executable shadow conflicts across folders, and writes changes back safely (backup first, then broadcast so running apps pick up the change without a reboot).
+EnvMaid is a Windows WPF (.NET 10, MVVM) desktop tool for cleaning up the Windows PATH environment variable. It scans User and System PATH separately, flags broken/duplicate/orphaned entries, detects executable shadow conflicts across folders, and writes changes back safely (backup first, then broadcast `WM_SETTINGCHANGE` so the shell refreshes its stored environment and *subsequently launched* processes inherit the new value — already-running processes keep their old environment permanently and must be restarted).
 
 ## Commands
 

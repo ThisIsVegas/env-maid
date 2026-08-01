@@ -11,6 +11,9 @@
     <AssemblyName>EnvMaid</AssemblyName>
     <RootNamespace>EnvMaid.App</RootNamespace>
     <Platforms>x64</Platforms>
+    <!-- Required by [LibraryImport]'s source-generated marshalling (SYSLIB1062).
+         Not an invitation to write unsafe blocks. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>

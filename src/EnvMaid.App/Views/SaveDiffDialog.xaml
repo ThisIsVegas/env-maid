@@ -18,6 +18,13 @@
             <TextBlock Text="A backup will be created before anything is written to Windows."
                        Style="{StaticResource MutedText}"
                        Margin="0,4,0,0"/>
+            <!-- Stated before the write, where it can still inform the decision. Deliberately
+                 does not claim the change is applied everywhere, and does not say running apps
+                 pick it up without a reboot — they keep the old environment permanently. -->
+            <TextBlock Text="After saving, newly launched programs will use the new PATH. Programs already running — terminals, editors, and services — keep the old one until they are restarted."
+                       Style="{StaticResource MutedText}"
+                       TextWrapping="Wrap"
+                       Margin="0,8,0,0"/>
         </StackPanel>
 
         <StackPanel DockPanel.Dock="Bottom"

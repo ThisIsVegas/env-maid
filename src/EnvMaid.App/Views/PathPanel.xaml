@@ -18,7 +18,10 @@
             <Setter Property="CanUserSortColumns" Value="False"/>
             <Setter Property="HeadersVisibility" Value="Column"/>
             <Setter Property="GridLinesVisibility" Value="None"/>
-            <Setter Property="RowDetailsVisibilityMode" Value="Collapsed"/>
+            <!-- VisibleWhenSelected is not what we want: the marker rows below belong to a
+                 boundary entry regardless of selection, and each template collapses itself
+                 when its own entry is not a boundary. -->
+            <Setter Property="RowDetailsVisibilityMode" Value="Visible"/>
             <Setter Property="SelectionMode" Value="Single"/>
             <Setter Property="SelectionUnit" Value="FullRow"/>
             <Setter Property="RowHeight" Value="46"/>
@@ -85,17 +88,27 @@
             <StackPanel Grid.Column="1" Orientation="Horizontal">
                 <TextBlock Text="{Binding LengthLabel}"
                            VerticalAlignment="Center"
-                           Margin="0,0,14,0">
+                           Margin="0,0,6,0">
                     <TextBlock.Style>
+                        <!-- Colour only above the write limit. A PATH in the caution band is
+                             common and permanent on many machines, and a warning that is always
+                             on is a warning nobody reads. -->
                         <Style TargetType="TextBlock" BasedOn="{StaticResource MutedText}">
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding LengthOverLimit}" Value="True">
-                                    <Setter Property="Foreground" Value="{StaticResource AttentionBrush}"/>
+                                    <Setter Property="Foreground" Value="{StaticResource DangerBrush}"/>
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
                     </TextBlock.Style>
                 </TextBlock>
+                <TextBlock Text="&#9432;"
+                           VerticalAlignment="Center"
+                           FontSize="13"
+                           Margin="0,0,14,0"
+                           Foreground="{StaticResource MutedTextBrush}"
+                           ToolTipService.ShowDuration="30000"
+                           ToolTip="Windows stores each scope's PATH as a single value. Past about 2,000 characters some tools that modify PATH may not handle it correctly; past 32,767 it cannot be written at all."/>
                 <Button x:Name="ToolsButton"
                         Content="Maintenance"
                         Style="{StaticResource SecondaryButton}"
@@ -189,7 +202,7 @@
                     <DataGridTemplateColumn Header="LOCATION" Width="*">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
-                                <TextBlock Text="{Binding Path}"
+                                <TextBlock Text="{Binding DisplayValue}"
                                            FontFamily="Cascadia Mono"
                                            TextTrimming="CharacterEllipsis"
                                            Margin="8,0,0,0"
@@ -209,6 +222,77 @@
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
                 </DataGrid.Columns>
+
+                <!-- Length markers. Drawn under the last entry before each boundary, so a user
+                     who also edits PATH from elsewhere can see where their value crosses one. -->
+                <DataGrid.RowDetailsTemplate>
+                    <DataTemplate>
+                        <StackPanel>
+                            <!-- One row per stored token, always: the token is the editable
+                                 unit, and splitting it into N rows would imply N independently
+                                 editable things, which the stored value cannot express. The
+                                 directories it contributes are shown beneath it instead. -->
+                            <Border Background="#16191F"
+                                    BorderBrush="{StaticResource DividerBrush}"
+                                    BorderThickness="0,1,0,1"
+                                    Padding="12,8"
+                                    Visibility="{Binding IsStructurallyAmbiguous, Converter={StaticResource BoolToVis}}">
+                                <StackPanel>
+                                    <TextBlock Foreground="{StaticResource MutedTextBrush}"
+                                               FontSize="11"
+                                               FontWeight="SemiBold">
+                                        <Run Text="This entry adds"/>
+                                        <Run Text="{Binding EffectiveDirectories.Count, Mode=OneWay}"/>
+                                        <Run Text="directories"/>
+                                    </TextBlock>
+                                    <ItemsControl ItemsSource="{Binding EffectiveDirectories}" Margin="0,4,0,0">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding}"
+                                                           FontFamily="Cascadia Mono"
+                                                           FontSize="12"
+                                                           TextWrapping="Wrap"
+                                                           Margin="8,1,0,1"/>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Border>
+                            <Border Background="#1E1A14"
+                                    BorderBrush="{StaticResource AttentionBrush}"
+                                    BorderThickness="0,1,0,1"
+                                    Padding="12,8"
+                                    Visibility="{Binding IsLengthLimitBoundary, Converter={StaticResource BoolToVis}}">
+                                <StackPanel>
+                                    <TextBlock Text="Length caution"
+                                               Foreground="{StaticResource AttentionBrush}"
+                                               FontSize="11"
+                                               FontWeight="SemiBold"/>
+                                    <TextBlock Text="Beyond this point, some tools that modify PATH may not handle this value correctly, and parts of it can be silently dropped. Editing here in EnvMaid is safe."
+                                               Style="{StaticResource MutedText}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,3,0,0"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Background="#231619"
+                                    BorderBrush="{StaticResource DangerBrush}"
+                                    BorderThickness="0,1,0,1"
+                                    Padding="12,8"
+                                    Visibility="{Binding IsWriteLimitBoundary, Converter={StaticResource BoolToVis}}">
+                                <StackPanel>
+                                    <TextBlock Text="Write limit"
+                                               Foreground="{StaticResource DangerBrush}"
+                                               FontSize="11"
+                                               FontWeight="SemiBold"/>
+                                    <TextBlock Text="A PATH this long cannot be written. Save will be refused until it is shortened."
+                                               Style="{StaticResource MutedText}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,3,0,0"/>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </DataTemplate>
+                </DataGrid.RowDetailsTemplate>
 
                 <DataGrid.ContextMenu>
                     <ContextMenu Background="{StaticResource ElevatedBrush}"
@@ -233,7 +317,7 @@
                                                     RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                   CommandParameter="{Binding PlacementTarget.SelectedItem,
                                                             RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                  IsEnabled="{Binding PlacementTarget.SelectedItem.Path,
+                                  IsEnabled="{Binding PlacementTarget.SelectedItem.ExpandedValue,
                                                       RelativeSource={RelativeSource AncestorType=ContextMenu},
                                                       Converter={StaticResource PathExists}}"/>
                         <MenuItem Header="Copy path"
@@ -283,7 +367,7 @@
                                                FontSize="12"
                                                FontWeight="SemiBold"
                                                Margin="0,0,0,8"/>
-                                    <TextBlock Text="{Binding Path}"
+                                    <TextBlock Text="{Binding DisplayValue}"
                                                FontFamily="Cascadia Mono"
                                                FontSize="15"
                                                TextWrapping="Wrap"/>

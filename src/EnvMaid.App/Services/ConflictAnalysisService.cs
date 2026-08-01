@@ -11,71 +11,87 @@ namespace EnvMaid.App.Services;
 /// </summary>
 public class ConflictAnalysisService
 {
-    private static readonly HashSet<string> ShadowCheckExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".exe", ".bat", ".cmd"
-    };
-
     private readonly ConflictRanker _ranker;
-
-    public ConflictAnalysisService(ConflictRanker ranker) => _ranker = ranker;
+    private readonly PathExtService _pathExt;
 
     /// <summary>
-    /// Groups shadowed executables across both scopes. Resolution order is System
-    /// entries first, then User entries (matches the real PATH lookup order).
+    /// What this analysis simulates, stated in the UI so the answer is not presented as
+    /// <em>the</em> answer. Resolution differs by launch mechanism, and this models one of them.
     /// </summary>
+    public const string ResolverProfile =
+        "Assumes a command typed at a shell prompt (cmd.exe or PowerShell), using the PATHEXT " +
+        "from your environment. Does not model App Paths or the current directory.";
+
+    public ConflictAnalysisService(ConflictRanker ranker, PathExtService? pathExt = null)
+    {
+        _ranker = ranker;
+        _pathExt = pathExt ?? new PathExtService();
+    }
+
+    /// <summary>
+    /// Groups shadowed commands across both scopes, System entries before User.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The unit is the <b>command name</b> — the filename with its extension stripped — not the
+    /// filename. <c>foo.bat</c> and <c>foo.exe</c> are not unrelated files; they compete for the
+    /// command <c>foo</c>, and only one of them ever runs.
+    /// </para>
+    /// <para>
+    /// Resolution is directory-major: for each folder in PATH order, every PATHEXT extension is
+    /// tried before moving to the next folder. So a folder earlier on PATH wins regardless of
+    /// extension, and within one folder the PATHEXT order decides.
+    /// </para>
+    /// </remarks>
     public IReadOnlyList<ConflictGroup> Analyze(
         IReadOnlyList<PathEntry> userEntries,
         IReadOnlyList<PathEntry> systemEntries)
     {
         var resolutionOrder = systemEntries.Concat(userEntries).ToList();
 
-        // exe name -> ordered list of (location, full file path), winner first.
-        var byExe = new Dictionary<string, List<(ConflictLocation Loc, string File)>>(StringComparer.OrdinalIgnoreCase);
+        // command name -> providers in resolution order, winner first.
+        var byCommand = new Dictionary<string, List<CommandProvider>>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var entry in resolutionOrder)
         {
-            var expanded = Environment.ExpandEnvironmentVariables(entry.Path);
+            var expanded = entry.ExpandedValue;
             if (!Directory.Exists(expanded))
                 continue;
 
             var location = new ConflictLocation(entry, expanded);
-            var seenInThisFolder = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var file in EnumerateExecutables(expanded))
+            foreach (var (command, file) in WinnersPerCommand(expanded))
             {
-                var name = Path.GetFileName(file);
-                if (!seenInThisFolder.Add(name))
-                    continue; // one entry per exe per folder
+                if (!byCommand.TryGetValue(command, out var providers))
+                    byCommand[command] = providers = new List<CommandProvider>();
 
-                if (!byExe.TryGetValue(name, out var list))
-                    byExe[name] = list = new List<(ConflictLocation, string)>();
-
-                // Only add a folder once per exe (a folder can appear twice on PATH).
-                if (!list.Any(x => PathsEqual(x.Loc.ExpandedFolder, expanded)))
-                    list.Add((location, file));
+                // A folder can appear twice on PATH; it only provides the command once.
+                if (!providers.Any(p => PathsEqual(p.Location.ExpandedFolder, expanded)))
+                    providers.Add(new CommandProvider(location, file));
             }
         }
 
         var groups = new List<ConflictGroup>();
-        foreach (var (exeName, locations) in byExe)
+        foreach (var (command, providers) in byCommand)
         {
-            if (locations.Count < 2)
+            if (providers.Count < 2)
                 continue; // no conflict
 
-            var winner = locations[0];
-            var losers = locations.Skip(1).ToList();
+            var winner = providers[0];
+            var losers = providers.Skip(1).ToList();
 
             // Band the group by its most-severe loser (the worst real problem present).
             var confidence = losers
-                .Select(l => _ranker.Rank(exeName, winner.File, l.File))
+                .Select(l => _ranker.Rank(Path.GetFileName(winner.File), winner.File, l.File))
                 .Max();
 
             groups.Add(new ConflictGroup(
-                exeName,
+                command,
                 confidence,
-                winner.Loc,
-                losers.Select(l => l.Loc).ToList()));
+                winner.Location,
+                losers.Select(l => l.Location).ToList(),
+                Path.GetFileName(winner.File),
+                losers.Select(l => Path.GetFileName(l.File)).ToList()));
         }
 
         // Most-serious conflicts first, then alphabetically.
@@ -86,11 +102,46 @@ public class ConflictAnalysisService
     }
 
     /// <summary>
-    /// For the delete prompt: which executables in <paramref name="folder"/> would
-    /// still be reachable via another PATH folder after this folder is removed.
-    /// Returns each exe name paired with the winning folder that still provides it
-    /// (null = lost, no other folder provides it).
+    /// For one folder, the file that would actually run for each command it provides.
     /// </summary>
+    /// <remarks>
+    /// Within a folder, PATHEXT order decides: if both <c>foo.com</c> and <c>foo.exe</c> are
+    /// present and <c>.COM</c> precedes <c>.EXE</c>, typing <c>foo</c> runs the <c>.com</c> and
+    /// the <c>.exe</c> is unreachable by that name. Only the winner represents the folder.
+    /// </remarks>
+    private IEnumerable<(string Command, string File)> WinnersPerCommand(string folder)
+    {
+        var best = new Dictionary<string, (string File, int Precedence)>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var file in EnumerateFiles(folder))
+        {
+            var precedence = _pathExt.PrecedenceOf(Path.GetExtension(file));
+            if (precedence < 0)
+                continue; // not runnable as a bare command
+
+            var command = Path.GetFileNameWithoutExtension(file);
+            if (command.Length == 0)
+                continue;
+
+            if (!best.TryGetValue(command, out var current) || precedence < current.Precedence)
+                best[command] = (file, precedence);
+        }
+
+        return best.Select(kv => (kv.Key, kv.Value.File));
+    }
+
+    private readonly record struct CommandProvider(ConflictLocation Location, string File);
+
+    /// <summary>
+    /// For the delete prompt: which commands in <paramref name="folderToRemove"/> would still be
+    /// reachable through another PATH folder afterwards. Each command is paired with the folder
+    /// that would take over, or null when nothing else provides it.
+    /// </summary>
+    /// <remarks>
+    /// Coverage is per <em>command</em>, not per filename: a folder providing <c>foo.exe</c>
+    /// still covers <c>foo</c> when the folder being removed had <c>foo.cmd</c>. Matching on the
+    /// filename would report a false loss and talk the user out of a safe removal.
+    /// </remarks>
     public IReadOnlyList<(string ExeName, string? CoveredBy)> CoverageAfterRemoving(
         ConflictLocation folderToRemove,
         IReadOnlyList<PathEntry> userEntries,
@@ -98,37 +149,40 @@ public class ConflictAnalysisService
     {
         var others = systemEntries.Concat(userEntries)
             .Where(e => !ReferenceEquals(e, folderToRemove.Entry))
-            .Select(e => (Entry: e, Expanded: Environment.ExpandEnvironmentVariables(e.Path)))
+            .Select(e => (Entry: e, Expanded: e.ExpandedValue))
             .Where(x => Directory.Exists(x.Expanded)
                         && !PathsEqual(x.Expanded, folderToRemove.ExpandedFolder))
             .ToList();
 
         var result = new List<(string, string?)>();
-        foreach (var file in EnumerateExecutables(folderToRemove.ExpandedFolder))
+        foreach (var (command, file) in WinnersPerCommand(folderToRemove.ExpandedFolder))
         {
-            var name = Path.GetFileName(file);
-            var coveringFolder = others
-                .FirstOrDefault(o => File.Exists(Path.Combine(o.Expanded, name)));
-            result.Add((name, coveringFolder.Entry?.Path));
+            var coveringFolder = others.FirstOrDefault(o => ProvidesCommand(o.Expanded, command));
+            result.Add((Path.GetFileName(file), coveringFolder.Entry?.RawToken));
         }
         return result;
     }
 
-    private static IEnumerable<string> EnumerateExecutables(string folder)
+    private bool ProvidesCommand(string folder, string command) =>
+        _pathExt.Extensions.Any(extension => File.Exists(Path.Combine(folder, command + extension)));
+
+    private static IEnumerable<string> EnumerateFiles(string folder)
     {
-        IEnumerable<string> files;
         try
         {
-            files = Directory.EnumerateFiles(folder);
+            return Directory.GetFiles(folder);
         }
         catch (IOException)
         {
-            yield break;
+            return Array.Empty<string>();
         }
-
-        foreach (var file in files)
-            if (ShadowCheckExtensions.Contains(Path.GetExtension(file)))
-                yield return file;
+        catch (UnauthorizedAccessException)
+        {
+            // A folder on PATH we cannot list is not the same as one with no executables, but
+            // nothing downstream can express that yet. Skipping keeps analysis running; the
+            // entry model's Inaccessible status is where this becomes visible.
+            return Array.Empty<string>();
+        }
     }
 
     private static bool PathsEqual(string a, string b) =>

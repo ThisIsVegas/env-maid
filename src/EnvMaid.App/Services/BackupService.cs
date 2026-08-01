@@ -9,9 +9,13 @@ public class BackupService
 {
     private readonly string _backupDir;
 
-    public BackupService()
+    /// <param name="backupDirectory">
+    /// Where backups live. Defaults to %APPDATA%\EnvMaid\backups; tests pass a temp folder so
+    /// they never write into the real one.
+    /// </param>
+    public BackupService(string? backupDirectory = null)
     {
-        _backupDir = Path.Combine(
+        _backupDir = backupDirectory ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "EnvMaid", "backups");
         Directory.CreateDirectory(_backupDir);

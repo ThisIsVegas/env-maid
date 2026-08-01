@@ -20,6 +20,12 @@ public partial class MainWindow : Window
             var dialog = new SaveDiffDialog(diffs) { Owner = this };
             return dialog.ShowDialog() == true;
         };
+        _viewModel.ResolveConflict = prompt =>
+        {
+            var dialog = new ConflictDialog(prompt) { Owner = this };
+            dialog.ShowDialog();
+            return dialog.Resolution;
+        };
         _viewModel.UserPaths.ConfirmMaintenance = ShowMaintenancePreview;
         _viewModel.SystemPaths.ConfirmMaintenance = ShowMaintenancePreview;
         _viewModel.PickExportFile = () =>
@@ -69,12 +75,12 @@ public partial class MainWindow : Window
 
     private void ReviewBroken_Click(object sender, RoutedEventArgs e)
     {
-        ReviewFirst(IsBroken);
+        ReviewFirst(entry => entry.IsBroken);
     }
 
     private void ReviewDuplicates_Click(object sender, RoutedEventArgs e)
     {
-        ReviewFirst(entry => entry.Flags.HasFlag(PathFlag.Duplicate));
+        ReviewFirst(entry => entry.IsDuplicate);
     }
 
     private void ReviewFirst(Func<PathEntry, bool> predicate)
@@ -105,9 +111,6 @@ public partial class MainWindow : Window
         MainTabs.SelectedIndex = 1;
         EditorTabs.SelectedIndex = tabIndex;
     }
-
-    private static bool IsBroken(PathEntry entry) =>
-        entry.Flags.HasFlag(PathFlag.Missing) || entry.Flags.HasFlag(PathFlag.Empty);
 
     private void RestoreBackup_Click(object sender, RoutedEventArgs e)
     {

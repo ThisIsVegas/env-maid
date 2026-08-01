@@ -34,6 +34,12 @@ public partial class ConflictsViewModel : ObservableObject
             SelectedLosers.Add(new LoserItem(loser, value.Winner.Scope));
     }
 
+    /// <summary>
+    /// Names what this analysis simulates, so a single answer is not presented as the answer.
+    /// Resolution differs by launch mechanism, and the exclusions are stated rather than hidden.
+    /// </summary>
+    public string ResolverProfile => ConflictAnalysisService.ResolverProfile;
+
     public bool HasConflicts => Groups.Count > 0;
 
     public int ConflictCount => Groups.Count;
